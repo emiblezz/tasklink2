@@ -50,21 +50,22 @@ class ResumeMatchResultModel {
   });
 
   factory ResumeMatchResultModel.fromJson(Map<String, dynamic> json) {
-    final List<dynamic> wordMatchesJson = json['word_matches'] ?? [];
-
     return ResumeMatchResultModel(
-      id: json['id'] ?? '',
-      jobId: json['job_id'] ?? '',
-      applicantId: json['applicant_id'] ?? '',
+      id: json['id'],
+      jobId: json['job_id'].toString(), // Convert to string regardless of original type
+      applicantId: json['applicant_id'],
       matchDate: json['match_date'] != null
           ? DateTime.parse(json['match_date'])
           : DateTime.now(),
-      similarityScore: (json['similarity_score'] ?? 0.0).toDouble(),
+      similarityScore: json['similarity_score'] is int
+          ? (json['similarity_score'] as int).toDouble()
+          : json['similarity_score'] as double,
       decision: json['decision'] ?? 'No Match',
-      wordMatches: wordMatchesJson
+      wordMatches: json['word_matches'] != null
+          ? (json['word_matches'] as List)
           .map((match) => WordMatchModel.fromJson(match))
-          .toList(),
-      feedback: json['feedback'],
+          .toList()
+          : [],
       improvementSuggestions: json['improvement_suggestions'],
     );
   }
@@ -87,15 +88,13 @@ class ResumeMatchResultModel {
   Map<String, dynamic> toDbJson() {
     return {
       'id': id,
-      'job_id': jobId,
+      'job_id': jobId.toString(), // Ensure string format for job_id
       'applicant_id': applicantId,
       'match_date': matchDate.toIso8601String(),
       'similarity_score': similarityScore,
       'decision': decision,
-      'feedback': feedback,
+      'word_matches': wordMatches.map((match) => match.toJson()).toList(),
       'improvement_suggestions': improvementSuggestions,
-      // Store only top 20 word matches to keep the DB record size reasonable
-      'word_matches': wordMatches.take(20).map((match) => match.toJson()).toList(),
     };
   }
 

@@ -128,12 +128,16 @@ class ResumeMatchService {
   }
 
   // Get all match results for a job
+  // In ResumeMatchService.dart
   Future<List<ResumeMatchResultModel>> getMatchResultsForJob(String jobId) async {
     try {
+      // Convert to string if needed, to ensure consistent type
+      final jobIdString = jobId.toString();
+
       final results = await _supabaseClient
           .from('resume_match_results')
           .select()
-          .eq('job_id', jobId)
+          .eq('job_id', jobIdString)  // Use string version
           .order('similarity_score', ascending: false);
 
       return (results as List)

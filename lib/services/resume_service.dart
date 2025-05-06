@@ -116,7 +116,7 @@ class ResumeService {
           .from('resumes')
           .select('*')
           .eq('applicant_id', userId)
-          .order('created_at', ascending: false)
+          .order('uploaded_date', ascending: false)
           .limit(1)
           .maybeSingle();  // Changed from single() to maybeSingle() to handle case where no record exists
 

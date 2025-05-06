@@ -602,29 +602,49 @@ class _CandidatesTabState extends State<_CandidatesTab> {
     });
 
     try {
-      print('Loading applications for job ID: $jobId');
+      debugPrint('Loading applications for job ID: $jobId');
 
-      // Use the simplified query to get all applications
-      final supabaseService = SupabaseService();
-      final applicationsList = await supabaseService.getJobApplicationsWithProfiles(jobId);
+      // Explicitly clear cache and fetch fresh data
+      final supabase = SupabaseService().supabaseClient;
 
-      print('Received ${applicationsList.length} applications');
+      // Use a direct query with cache disabled
+      final response = await supabase
+          .from('applications')
+          .select('*')
+          .eq('job_id', jobId)
+          .order('date_applied', ascending: false);
 
-      if (applicationsList.isEmpty) {
-        // Try the fallback method directly
-        print('No applications found, trying fallback method');
-        //_loadApplicationsFallback(jobId);
+      debugPrint('Received raw application data: $response');
+
+      if (response == null || (response is List && response.isEmpty)) {
+        setState(() {
+          _applications = [];
+          _isLoading = false;
+        });
         return;
       }
 
-      // Convert to ApplicationModel objects
+      // Convert to ApplicationModel objects with explicit field mapping
       final List<ApplicationModel> processedApplications = [];
-      for (var item in applicationsList) {
+      for (var item in response) {
         try {
-          final app = ApplicationModel.fromJson(item);
+          // Add a debug log to see what each application looks like
+          debugPrint('Processing application: $item');
+
+          final app = ApplicationModel(
+            id: item['application_id'],
+            jobId: item['job_id'],
+            applicantId: item['applicant_id'],
+            applicationStatus: item['application_status'],
+            dateApplied: item['date_applied'] != null
+                ? DateTime.parse(item['date_applied'])
+                : DateTime.now(),
+          );
+
+          debugPrint('Created application model with status: ${app.applicationStatus}');
           processedApplications.add(app);
         } catch (e) {
-          print('Error converting application data: $e');
+          debugPrint('Error processing application: $e');
         }
       }
 
@@ -632,19 +652,47 @@ class _CandidatesTabState extends State<_CandidatesTab> {
         _applications = processedApplications;
         _isLoading = false;
       });
+
+      // Force UI refresh after a short delay
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) setState(() {});
+      });
     } catch (e) {
-      print('Error loading applications: $e');
-      // Fallback to the basic method if the first method fails
-      //_loadApplicationsFallback(jobId);
+      debugPrint('Error loading applications: $e');
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _updateApplicationStatus(int applicationId, String status) async {
-    final jobService = Provider.of<JobService>(context, listen: false);
-    await jobService.updateApplicationStatus(applicationId, status);
+    try {
+      setState(() {
+        _isLoading = true;
+      });
 
-    if (_selectedJob != null) {
-      await _loadApplications(_selectedJob!.id!);
+      final jobService = Provider.of<JobService>(context, listen: false);
+      final success = await jobService.updateApplicationStatus(applicationId, status);
+
+      if (success && _selectedJob != null) {
+        debugPrint('Status update successful, refreshing application list');
+
+        // Clear cache and fetch fresh data
+        await _loadApplications(_selectedJob!.id!);
+
+        // Force UI refresh
+        setState(() {});
+      } else {
+        debugPrint('Status update failed or no job selected');
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error in _updateApplicationStatus: $e');
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 

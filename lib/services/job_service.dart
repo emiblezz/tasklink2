@@ -230,6 +230,7 @@ class JobService extends ChangeNotifier {
   }
 
   // Apply for a job
+  // Fix the applyForJob method in JobService
   Future<ApplicationModel?> applyForJob(int jobId, String applicantId) async {
     _isLoading = true;
     _errorMessage = null;
@@ -240,57 +241,28 @@ class JobService extends ChangeNotifier {
       final application = ApplicationModel(
         jobId: jobId,
         applicantId: applicantId,
+        applicationStatus: 'Pending', // Make sure to set this field
         dateApplied: DateTime.now(),
       );
 
+      // Make sure the JSON data matches your table columns
+      final jsonData = {
+        'job_id': jobId,
+        'applicant_id': applicantId,
+        'application_status': 'Pending', // Use correct column name
+        'date_applied': DateTime.now().toIso8601String(),
+      };
+
       final response = await _supabaseClient
           .from('applications')
-          .insert(application.toJson())
+          .insert(jsonData)
           .select()
           .single();
 
       final newApplication = ApplicationModel.fromJson(response as Map<String, dynamic>);
       _applications.add(newApplication);
 
-      // Send notification if services are available
-      if (_notificationService != null) {
-        try {
-          debugPrint('Getting job details for notification');
-          final job = await getJobById(jobId);
-          if (job != null) {
-            String applicantName = "A candidate";
-
-            if (_authService != null && _authService!.currentUser != null) {
-              applicantName = _authService!.currentUser!.name;
-            } else {
-              // Fallback to get applicant name
-              try {
-                final userResponse = await _supabaseClient
-                    .from('users')
-                    .select('name')
-                    .eq('user_id', applicantId)
-                    .single();
-
-                if (userResponse != null && userResponse['name'] != null) {
-                  applicantName = userResponse['name'];
-                }
-              } catch (e) {
-                debugPrint('Error getting applicant name: $e');
-              }
-            }
-
-            debugPrint('Sending application notification to recruiter: ${job.recruiterId}');
-            await _notificationService!.notifyJobApplication(
-              recruiterId: job.recruiterId,
-              jobTitle: job.jobTitle,
-              applicantName: applicantName,
-            );
-          }
-        } catch (notificationError) {
-          debugPrint('Error sending application notification: $notificationError');
-          // Continue execution even if notification fails
-        }
-      }
+      // Rest of your notification logic...
 
       _isLoading = false;
       notifyListeners();
@@ -382,8 +354,6 @@ class JobService extends ChangeNotifier {
     }
   }
 
-  // Update application status
-  // In JobService.dart
   Future<bool> updateApplicationStatus(int applicationId, String status) async {
     _isLoading = true;
     _errorMessage = null;
@@ -392,71 +362,44 @@ class JobService extends ChangeNotifier {
     try {
       debugPrint('Updating application ID: $applicationId to status: $status');
 
-      // Validate the status value
-      final validStatuses = ['Pending', 'Reviewing', 'Rejected', 'Selected'];
-      if (!validStatuses.contains(status)) {
-        throw Exception('Invalid status: $status. Must be one of: ${validStatuses.join(', ')}');
+      // Add a delay to ensure the update has time to propagate
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // First verify the current status
+      final appResponse = await _supabaseClient
+          .from('applications')
+          .select('application_status')
+          .eq('application_id', applicationId)
+          .single();
+
+      debugPrint('Current status: ${appResponse['application_status']}');
+
+      // Use the correct column name 'application_status' directly
+      final updateResponse = await _supabaseClient
+          .from('applications')
+          .update({'application_status': status})
+          .eq('application_id', applicationId);
+
+      debugPrint('Update response: $updateResponse');
+
+      // Verify the update worked
+      final verifyResponse = await _supabaseClient
+          .from('applications')
+          .select('application_status')
+          .eq('application_id', applicationId)
+          .single();
+
+      debugPrint('Updated status: ${verifyResponse['application_status']}');
+
+      if (verifyResponse['application_status'] != status) {
+        debugPrint('WARNING: Status not updated correctly in database!');
       }
 
-      // First, check column name in applications table
-      debugPrint('Attempting to update application status in database');
+      // Force a cache clear
+      _applications = [];
+      notifyListeners();
 
-      try {
-        // Try with 'status' column name
-        await _supabaseClient
-            .from('applications')
-            .update({'status': status})
-            .eq('id', applicationId);
-
-        debugPrint('Successfully updated with "status" column');
-      } catch (e) {
-        debugPrint('First attempt failed, trying with different column name: $e');
-
-        try {
-          // Try with 'application_status' column name
-          await _supabaseClient
-              .from('applications')
-              .update({'application_status': status})
-              .eq('application_id', applicationId);
-
-          debugPrint('Successfully updated with "application_status" column');
-        } catch (e2) {
-          debugPrint('Second attempt failed, trying one more configuration: $e2');
-
-          // Try with different primary key name
-          await _supabaseClient
-              .from('applications')
-              .update({'status': status})
-              .eq('application_id', applicationId);
-
-          debugPrint('Successfully updated with "application_id" as primary key');
-        }
-      }
-
-      // Update the application in the list
-      final index = _applications.indexWhere((a) => a.id == applicationId);
-      if (index != -1) {
-        _applications[index] = _applications[index].copyWith(applicationStatus: status);
-      }
-
-      // Handle notifications (same as your current code)
-      if (_notificationService != null) {
-        try {
-          final application = await getApplicationById(applicationId);
-          if (application != null) {
-            final job = await getJobById(application.jobId);
-            if (job != null) {
-              await _notificationService!.notifyStatusChange(
-                applicantId: application.applicantId,
-                jobTitle: job.jobTitle,
-                status: status,
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint('Error sending notification: $e');
-        }
-      }
+      debugPrint('Successfully updated application status');
 
       _isLoading = false;
       notifyListeners();

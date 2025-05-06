@@ -22,6 +22,53 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     aiService: AIService(baseUrl: AppConfig.backendUrl),
   );
 
+  // Updated _getApplicantName method in CVRankingScreen
+  // Updated _getApplicantName method in CVRankingScreen with proper Dart syntax
+  String _getApplicantName(Map<String, dynamic> rankedApplication) {
+    try {
+      // First check if it's directly in the rankedApplication
+      if (rankedApplication['applicant_name'] != null) {
+        return rankedApplication['applicant_name'];
+      }
+
+      // Try to get from the application object
+      final application = rankedApplication['application'];
+      if (application != null && application is Map) {
+        // Check for direct applicant_name in application
+        if (application['applicant_name'] != null) {
+          return application['applicant_name'];
+        }
+
+        // Check for application ID
+        if (application['application_id'] != null) {
+          return 'Application #${application['application_id']}';
+        }
+
+        // Check for applicant object
+        if (application['applicant'] != null) {
+          final applicant = application['applicant'];
+          if (applicant is Map) {
+            if (applicant['name'] != null) return applicant['name'];
+            if (applicant['email'] != null) return applicant['email'];
+          }
+        }
+
+        // Try applicant_id
+        if (application['applicant_id'] != null) {
+          final id = application['applicant_id'].toString();
+          // Use dart syntax for min
+          return 'Applicant ${id.substring(0, id.length > 8 ? 8 : id.length)}';
+        }
+      }
+
+      // Default fallback
+      return 'Unknown Applicant';
+    } catch (e) {
+      debugPrint('Error getting applicant name: $e');
+      return 'Unknown Applicant';
+    }
+  }
+
   final ResumeMatchService _resumeMatchService = ResumeMatchService();
 
   final ResumeService _resumeService = ResumeService(
@@ -133,7 +180,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
   }
 
   Future<void> _fetchRankedApplications() async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || !mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -143,12 +190,14 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     try {
       // First check if we have match results in the database
       final matchResults = await _resumeMatchService.getMatchResultsForJob(
-          widget.job.id!.toString()
+          widget.job.id!.toString()  // Ensure string type
       );
+
+      if (!mounted) return;  // Check if widget is still mounted
 
       if (matchResults.isNotEmpty) {
         // We have match results, convert them to the format expected by the UI
-        final List<Map<String, dynamic>> rankedApps = [];
+        final List<Map<String, dynamic>> applicationsList = [];
 
         for (final result in matchResults) {
           try {
@@ -172,7 +221,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
                 .toSet()
                 .toList();
 
-            rankedApps.add({
+            applicationsList.add({
               'application': appData,
               'score': result.similarityScore,
               'matching_skills': matchedSkills,
@@ -187,17 +236,22 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
         }
 
         // Sort by score in descending order
-        rankedApps.sort((a, b) => (b['score'] as num).compareTo(a['score'] as num));
+        applicationsList.sort((a, b) => (b['score'] as num).compareTo(a['score'] as num));
+
+        if (!mounted) return;
 
         setState(() {
-          _rankedApplications = rankedApps;
+          _rankedApplications = applicationsList;
           _isLoading = false;
         });
       } else {
         // No stored results, use traditional ranking method
-        await _rankApplications();
+        if (!mounted) return;
+        await _performRanking();
       }
     } catch (e) {
+      if (!mounted) return;
+
       setState(() {
         _isLoading = false;
         _errorMessage = 'Error fetching ranking results: $e';
@@ -205,7 +259,10 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
 
-  Future<void> _rankApplications() async {
+// Rename to avoid duplicate method name
+  Future<void> _performRanking() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -213,22 +270,27 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
 
     try {
       final rankedApplications = await _rankingService.rankApplications(
-        widget.job.id!.toString(),
+        widget.job.id!.toString(),  // Ensure string type
         widget.job.description!,
       );
 
+      if (!mounted) return;
+
       setState(() {
-        _rankedApplications = rankedApplications;
         _rankedApplications = rankedApplications;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
+
       setState(() {
         _isLoading = false;
         _errorMessage = 'Error ranking applications: $e';
       });
     }
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -280,7 +342,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
             Text(_errorMessage!, textAlign: TextAlign.center),
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: _rankApplications,
+              onPressed: _performRanking,
               child: const Text('Try Again'),
             ),
           ],
@@ -320,12 +382,13 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // In the _buildRankingTab method, update the applicant name display
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
                       child: Text(
-                        '${application['applicant']['full_name']}',
+                        _getApplicantName(rankedApp),
                         style: Theme.of(context).textTheme.titleLarge,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -337,7 +400,9 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        'Score: ${(score * 100).toStringAsFixed(1)}%',
+                        score != null
+                            ? 'Score: ${(score * 100).toStringAsFixed(1)}%'
+                            : 'No Score',
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,

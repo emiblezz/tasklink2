@@ -7,6 +7,7 @@ import 'package:tasklink2/models/jobseeker_profile_model.dart';
 class SupabaseService {
   // Use Supabase.instance.client instead of AppConfig().supabaseClient
   final SupabaseClient _supabaseClient = AppConfig().supabaseClient;
+  SupabaseClient get supabaseClient => _supabaseClient;
 
   // Getter for external access if needed
   SupabaseClient get supabase => _supabaseClient;
@@ -62,7 +63,7 @@ class SupabaseService {
         final response = await _supabaseClient
             .from('users')
             .select()
-            .eq('id', userId)
+            .eq('user_id', userId)
             .maybeSingle(); // Use maybeSingle instead of single
 
         if (response != null) {
