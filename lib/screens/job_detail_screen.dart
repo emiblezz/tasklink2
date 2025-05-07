@@ -143,6 +143,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   @override
+  // In JobDetailScreen
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -165,14 +167,108 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Job title and type
-            Text(
-              widget.job.jobTitle,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+            // Company logo and title
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Company logo
+                if (widget.job.companyLogo != null && widget.job.companyLogo!.isNotEmpty)
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        widget.job.companyLogo!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => const Center(
+                          child: Icon(Icons.business, size: 40, color: Colors.grey),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.business, size: 40, color: Colors.grey),
+                    ),
+                  ),
+                const SizedBox(width: 16),
+
+                // Title and company info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.job.jobTitle,
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.job.companyName,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.job.location,
+                            style: TextStyle(color: Colors.grey.shade700),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 24),
+
+            // Salary information
+            if (widget.job.salary != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade100),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.attach_money, color: Colors.green.shade700),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Salary: ${NumberFormat.currency(symbol: '\$').format(widget.job.salary)}',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            // Job type and status
             Row(
               children: [
                 Chip(

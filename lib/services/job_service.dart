@@ -1,27 +1,60 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase/supabase.dart';
 import 'package:tasklink2/config/app_config.dart';
-import 'package:tasklink2/models/job_model.dart';
 import 'package:tasklink2/models/application_model.dart';
-import 'package:tasklink2/services/auth_service.dart';
-import 'package:tasklink2/services/notification_service.dart';
+import 'package:tasklink2/models/job_model.dart';
 
-class JobService extends ChangeNotifier {
+import 'auth_service.dart';
+import 'notification_service.dart';
+
+class JobService with ChangeNotifier {
   final SupabaseClient _supabaseClient = AppConfig().supabaseClient;
-  AuthService? _authService;
-  NotificationService? _notificationService;
-
-  List<JobModel> _jobs = [];
-  List<ApplicationModel> _applications = [];
   bool _isLoading = false;
   String? _errorMessage;
-
-  List<JobModel> get jobs => _jobs;
-  List<ApplicationModel> get applications => _applications;
+  List<JobModel> _jobs = [];
+  List<ApplicationModel> _applications = [];
+  Set<int> _dismissedJobIds = {}; // Added for job dismissal functionality
+  DateTime _lastDismissedJobsLoadTime = DateTime.now();
+  String? _statusFilter;
+  Set<int> get dismissedJobIds => _dismissedJobIds;
+  // Getters
+  AuthService? _authService;
+  NotificationService? _notificationService;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  List<JobModel> get jobs => _jobs;
+  List<ApplicationModel> get applications => _applications;
+  String? get statusFilter => _statusFilter;
 
-  // Allow setting services from outside
+  // Getter for filtered jobs based on status
+  List<JobModel> get recruiterJobs {
+    if (_statusFilter == null) {
+      return _jobs;
+    }
+    return _jobs.where((job) => job.status == _statusFilter).toList();
+  }
+
+  // Getter for visible jobs (not dismissed and not expired)
+  List<JobModel> get visibleJobs {
+    final now = DateTime.now();
+    return _jobs.where((job) =>
+    !_dismissedJobIds.contains(job.id) &&
+        job.deadline.isAfter(now) &&
+        job.status == 'Open'
+    ).toList();
+  }
+
+  // Constructor - load dismissed jobs
+  JobService() {
+    loadDismissedJobs();
+  }
+
+  // Set status filter
+  void setStatusFilter(String? filter) {
+    _statusFilter = filter;
+    notifyListeners();
+  }
   void setAuthService(AuthService authService) {
     _authService = authService;
   }
@@ -30,14 +63,13 @@ class JobService extends ChangeNotifier {
     _notificationService = notificationService;
   }
 
-  // Get all jobs
-  Future<void> fetchJobs() async {
+  // Fetch all jobs
+  Future<List<JobModel>> fetchJobs() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      debugPrint('Fetching all open jobs');
       final response = await _supabaseClient
           .from('job_postings')
           .select()
@@ -45,24 +77,39 @@ class JobService extends ChangeNotifier {
           .order('date_posted', ascending: false);
 
       _jobs = (response as List).map((job) => JobModel.fromJson(job)).toList();
+
+      // Load dismissed jobs if not loaded in the last hour
+      if (DateTime.now().difference(_lastDismissedJobsLoadTime).inHours >= 1) {
+        await loadDismissedJobs();
+      }
+
       _isLoading = false;
       notifyListeners();
+      return _jobs;
     } catch (e) {
       debugPrint('Error fetching jobs: $e');
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
+      return [];
     }
   }
 
-  // Get recruiter's jobs
-  Future<void> fetchRecruiterJobs(String recruiterId) async {
+  // Fetch jobs posted by a specific recruiter
+  // Update the fetchRecruiterJobs method to handle nullable recruiterId
+  Future<List<JobModel>> fetchRecruiterJobs(String? recruiterId) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      debugPrint('Fetching jobs for recruiter: $recruiterId');
+      if (recruiterId == null) {
+        _errorMessage = 'Recruiter ID is required';
+        _isLoading = false;
+        notifyListeners();
+        return [];
+      }
+
       final response = await _supabaseClient
           .from('job_postings')
           .select()
@@ -70,135 +117,20 @@ class JobService extends ChangeNotifier {
           .order('date_posted', ascending: false);
 
       _jobs = (response as List).map((job) => JobModel.fromJson(job)).toList();
+
       _isLoading = false;
       notifyListeners();
+      return _jobs;
     } catch (e) {
       debugPrint('Error fetching recruiter jobs: $e');
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
-    }
-  }
-
-  // Get job by ID
-  Future<JobModel?> getJobById(int jobId) async {
-    try {
-      debugPrint('Getting job with ID: $jobId');
-      final response = await _supabaseClient
-          .from('job_postings')
-          .select()
-          .eq('job_id', jobId)
-          .single();
-
-      return JobModel.fromJson(response as Map<String, dynamic>);
-    } catch (e) {
-      debugPrint('Error getting job by ID: $e');
-      _errorMessage = e.toString();
-      return null;
-    }
-  }
-
-  // Create a new job
-  Future<JobModel?> createJob(JobModel job) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      debugPrint('Creating new job: ${job.jobTitle}');
-      final response = await _supabaseClient
-          .from('job_postings')
-          .insert(job.toJson())
-          .select()
-          .single();
-
-      final newJob = JobModel.fromJson(response as Map<String, dynamic>);
-      _jobs.add(newJob);
-
-      // Send notifications if the service is available
-      if (_notificationService != null && _authService != null && _authService!.currentUser != null) {
-        try {
-          // Get job seekers - this is simplified and would need to be replaced
-          // with your actual implementation to fetch job seekers
-          List<String> jobSeekerIds = await _getJobSeekerIds();
-
-          await _notificationService!.notifyNewJob(
-            jobSeekerIds: jobSeekerIds,
-            jobTitle: newJob.jobTitle,
-            companyName: _authService!.currentUser!.name,
-          );
-        } catch (notificationError) {
-          debugPrint('Error sending job notifications: $notificationError');
-          // Continue execution even if notifications fail
-        }
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return newJob;
-    } catch (e) {
-      debugPrint('Error creating job: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return null;
-    }
-  }
-
-  // Helper method to get job seeker IDs
-  Future<List<String>> _getJobSeekerIds() async {
-    try {
-      debugPrint('Fetching job seeker IDs');
-      // Example implementation - replace with your actual query
-      final response = await _supabaseClient
-          .from('users')
-          .select('user_id')
-          .eq('role_id', 1) // Assuming 1 is the job seeker role ID
-          .limit(20); // Limit to avoid notifying too many users
-
-      return (response as List).map((user) => user['user_id'] as String).toList();
-    } catch (e) {
-      debugPrint('Error fetching job seeker IDs: $e');
       return [];
     }
   }
 
-  // Update job
-  Future<JobModel?> updateJob(JobModel job) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      debugPrint('Updating job ID: ${job.id}, title: ${job.jobTitle}');
-      final response = await _supabaseClient
-          .from('job_postings')
-          .update(job.toJson())
-          .eq('job_id', job.id)
-          .select()
-          .single();
-
-      final updatedJob = JobModel.fromJson(response as Map<String, dynamic>);
-
-      // Update the job in the list
-      final index = _jobs.indexWhere((j) => j.id == job.id);
-      if (index != -1) {
-        _jobs[index] = updatedJob;
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return updatedJob;
-    } catch (e) {
-      debugPrint('Error updating job: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return null;
-    }
-  }
-
-  // Close a job
+// Add the closeJob method
   Future<bool> closeJob(int jobId) async {
     _isLoading = true;
     _errorMessage = null;
@@ -206,15 +138,18 @@ class JobService extends ChangeNotifier {
 
     try {
       debugPrint('Closing job ID: $jobId');
+
+      // Update the status to 'Closed'
       await _supabaseClient
           .from('job_postings')
           .update({'status': 'Closed'})
           .eq('job_id', jobId);
 
-      // Update the job in the list
-      final index = _jobs.indexWhere((j) => j.id == jobId);
-      if (index != -1) {
-        _jobs[index] = _jobs[index].copyWith(status: 'Closed');
+      // Update the job in the local list
+      final jobIndex = _jobs.indexWhere((job) => job.id == jobId);
+      if (jobIndex != -1) {
+        final updatedJob = _jobs[jobIndex].copyWith(status: 'Closed');
+        _jobs[jobIndex] = updatedJob;
       }
 
       _isLoading = false;
@@ -229,183 +164,67 @@ class JobService extends ChangeNotifier {
     }
   }
 
-  // Apply for a job
-  // Fix the applyForJob method in JobService
-  Future<ApplicationModel?> applyForJob(int jobId, String applicantId) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
+  // Get job by ID
+  Future<JobModel?> getJobById(int jobId) async {
     try {
-      debugPrint('Applying for job ID: $jobId, applicant: $applicantId');
-      final application = ApplicationModel(
-        jobId: jobId,
-        applicantId: applicantId,
-        applicationStatus: 'Pending', // Make sure to set this field
-        dateApplied: DateTime.now(),
+      // Check if the job is already in the loaded jobs
+      final cachedJob = _jobs.firstWhere(
+            (job) => job.id == jobId,
+        orElse: () => JobModel(
+          jobTitle: '',
+          companyName: '',
+          jobType: '',
+          location: '',
+          deadline: DateTime.now(),
+          status: '',
+          description: '',
+          requirements: '',
+        ),
       );
 
-      // Make sure the JSON data matches your table columns
-      final jsonData = {
-        'job_id': jobId,
-        'applicant_id': applicantId,
-        'application_status': 'Pending', // Use correct column name
-        'date_applied': DateTime.now().toIso8601String(),
-      };
+      if (cachedJob.id != null) {
+        return cachedJob;
+      }
 
+      // If not found in cache, fetch from database
       final response = await _supabaseClient
-          .from('applications')
-          .insert(jsonData)
+          .from('job_postings')
           .select()
+          .eq('job_id', jobId)
           .single();
 
-      final newApplication = ApplicationModel.fromJson(response as Map<String, dynamic>);
-      _applications.add(newApplication);
-
-      // Rest of your notification logic...
-
-      _isLoading = false;
-      notifyListeners();
-      return newApplication;
+      return JobModel.fromJson(response as Map<String, dynamic>);
     } catch (e) {
-      debugPrint('Error applying for job: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
+      debugPrint('Error getting job by ID: $e');
       return null;
     }
   }
 
-  // Get user applications
-  Future<void> fetchUserApplications(String userId) async {
+  // Create a new job
+  Future<bool> createJob(JobModel job) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      debugPrint('Fetching applications for user: $userId');
-      final response = await _supabaseClient
-          .from('applications')
-          .select()
-          .eq('applicant_id', userId)
-          .order('date_applied', ascending: false);
+      final jobData = job.toJson();
+      // Remove the ID field when creating a new job
+      jobData.remove('job_id');
 
-      _applications = (response as List).map((app) => ApplicationModel.fromJson(app)).toList();
-      debugPrint('Found ${_applications.length} applications for user');
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error fetching user applications: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
+      await _supabaseClient.from('job_postings').insert(jobData);
 
-  // Get applications for a job
-  Future<List<ApplicationModel>> getJobApplications(int jobId) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      debugPrint('Fetching applications for job ID: $jobId');
-      final response = await _supabaseClient
-          .from('applications')
-          .select()
-          .eq('job_id', jobId);
-
-      if (response is List) {
-        final applications = response.map((app) => ApplicationModel.fromJson(app)).toList();
-        debugPrint('Found ${applications.length} applications for job');
-        _isLoading = false;
-        notifyListeners();
-        return applications;
+      // Refresh the job list
+      if (job.recruiterId != null) {
+        await fetchRecruiterJobs(job.recruiterId!);
       } else {
-        debugPrint('Unexpected response format from applications query');
-        _isLoading = false;
-        notifyListeners();
-        return [];
+        await fetchJobs();
       }
-    } catch (e) {
-      debugPrint('Error getting job applications: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return [];
-    }
-  }
-
-  // Get application by ID
-  Future<ApplicationModel?> getApplicationById(int applicationId) async {
-    try {
-      debugPrint('Getting application with ID: $applicationId');
-      final response = await _supabaseClient
-          .from('applications')
-          .select()
-          .eq('application_id', applicationId)
-          .single();
-
-      return ApplicationModel.fromJson(response as Map<String, dynamic>);
-    } catch (e) {
-      debugPrint('Error getting application by ID: $e');
-      _errorMessage = e.toString();
-      return null;
-    }
-  }
-
-  Future<bool> updateApplicationStatus(int applicationId, String status) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      debugPrint('Updating application ID: $applicationId to status: $status');
-
-      // Add a delay to ensure the update has time to propagate
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // First verify the current status
-      final appResponse = await _supabaseClient
-          .from('applications')
-          .select('application_status')
-          .eq('application_id', applicationId)
-          .single();
-
-      debugPrint('Current status: ${appResponse['application_status']}');
-
-      // Use the correct column name 'application_status' directly
-      final updateResponse = await _supabaseClient
-          .from('applications')
-          .update({'application_status': status})
-          .eq('application_id', applicationId);
-
-      debugPrint('Update response: $updateResponse');
-
-      // Verify the update worked
-      final verifyResponse = await _supabaseClient
-          .from('applications')
-          .select('application_status')
-          .eq('application_id', applicationId)
-          .single();
-
-      debugPrint('Updated status: ${verifyResponse['application_status']}');
-
-      if (verifyResponse['application_status'] != status) {
-        debugPrint('WARNING: Status not updated correctly in database!');
-      }
-
-      // Force a cache clear
-      _applications = [];
-      notifyListeners();
-
-      debugPrint('Successfully updated application status');
 
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      debugPrint('Error updating application status: $e');
+      debugPrint('Error creating job: $e');
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
@@ -413,39 +232,80 @@ class JobService extends ChangeNotifier {
     }
   }
 
-  // Search jobs
-  // In JobService.dart
+  // Update an existing job
+  Future<bool> updateJob(JobModel job) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _supabaseClient
+          .from('job_postings')
+          .update(job.toJson())
+          .eq('job_id', job.id);
+
+      // Refresh the job list
+      if (job.recruiterId != null) {
+        await fetchRecruiterJobs(job.recruiterId!);
+      } else {
+        await fetchJobs();
+      }
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error updating job: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Delete a job
+  Future<bool> deleteJob(int jobId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      debugPrint('Deleting job ID: $jobId');
+      await _supabaseClient
+          .from('job_postings')
+          .delete()
+          .eq('job_id', jobId);
+
+      // Remove from local lists
+      _jobs.removeWhere((job) => job.id == jobId);
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting job: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Search for jobs
   Future<List<JobModel>> searchJobs(String query) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      debugPrint('Searching jobs with query: "${query.trim()}"');
-
-      if (query.trim().isEmpty) {
-        // If empty query, return all jobs
-        await fetchJobs();
-        _isLoading = false;
-        notifyListeners();
-        return _jobs;
-      }
-
-      // Sanitize query for Supabase - prepare search pattern
-      final searchPattern = '%${query.trim().toLowerCase()}%';
-
       final response = await _supabaseClient
           .from('job_postings')
           .select()
           .eq('status', 'Open')
-          .or('job_title.ilike.$searchPattern,description.ilike.$searchPattern,company_name.ilike.$searchPattern,job_type.ilike.$searchPattern,location.ilike.$searchPattern')
+          .or('job_title.ilike.%${query}%,job_type.ilike.%${query}%,company_name.ilike.%${query}%,location.ilike.%${query}%,description.ilike.%${query}%')
           .order('date_posted', ascending: false);
 
-      debugPrint('Search found ${response.length} results');
-
-      final results = (response as List)
-          .map((job) => JobModel.fromJson(job))
-          .toList();
+      final results = (response as List).map((job) => JobModel.fromJson(job)).toList();
 
       _isLoading = false;
       notifyListeners();
@@ -459,11 +319,204 @@ class JobService extends ChangeNotifier {
     }
   }
 
-
-  // Clear error
-  void clearError() {
+  // Apply for a job
+  Future<bool> applyForJob(int jobId, String applicantId) async {
+    _isLoading = true;
     _errorMessage = null;
     notifyListeners();
+    if (_authService == null || _authService!.currentUser == null) {
+      _errorMessage = 'You must be logged in to apply for jobs';
+      notifyListeners();
+      return false;
+    }
+    final applicantId = _authService!.currentUser!.id;
+
+    try {
+      // Check if already applied
+      final existingApplication = await _supabaseClient
+          .from('applications')
+          .select()
+          .eq('job_id', jobId)
+          .eq('applicant_id', applicantId)
+          .maybeSingle();
+
+
+      if (existingApplication != null) {
+        _errorMessage = 'You have already applied for this job';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Create the application
+      await _supabaseClient.from('applications').insert({
+        'job_id': jobId,
+        'applicant_id': applicantId,
+        'application_status': 'Pending',
+        'date_applied': DateTime.now().toIso8601String(),
+      });
+
+      // Refresh applications
+      await fetchUserApplications(applicantId);
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error applying for job: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
   }
 
+  // Fetch applications for a user
+  Future<List<ApplicationModel>> fetchUserApplications(String userId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final response = await _supabaseClient
+          .from('applications')
+          .select()
+          .eq('applicant_id', userId)
+          .order('date_applied', ascending: false);
+
+      _applications = (response as List)
+          .map((app) => ApplicationModel.fromJson(app))
+          .toList();
+
+      _isLoading = false;
+      notifyListeners();
+      return _applications;
+    } catch (e) {
+      debugPrint('Error fetching applications: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return [];
+    }
+  }
+
+  // Update application status
+  Future<bool> updateApplicationStatus(int applicationId, String status) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      debugPrint('Updating application ID: $applicationId to status: $status');
+
+      // Use the correct column name 'application_status'
+      await _supabaseClient
+          .from('applications')
+          .update({'application_status': status})
+          .eq('application_id', applicationId);
+
+      debugPrint('Successfully updated application status');
+
+      // Update the application in the local list
+      final index = _applications.indexWhere((a) => a.id == applicationId);
+      if (index != -1) {
+        _applications[index] = _applications[index].copyWith(applicationStatus: status);
+      }
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error updating application status: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Delete an application
+  Future<bool> deleteApplication(int applicationId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      debugPrint('Deleting application ID: $applicationId');
+      await _supabaseClient
+          .from('applications')
+          .delete()
+          .eq('application_id', applicationId);
+
+      // Remove from local list
+      _applications.removeWhere((app) => app.id == applicationId);
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting application: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Methods for job dismissal functionality
+  Future<void> loadDismissedJobs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dismissedIds = prefs.getStringList('dismissed_jobs') ?? [];
+      _dismissedJobIds = dismissedIds.map((id) => int.parse(id)).toSet();
+      _lastDismissedJobsLoadTime = DateTime.now();
+      debugPrint('Loaded ${_dismissedJobIds.length} dismissed jobs');
+    } catch (e) {
+      debugPrint('Error loading dismissed jobs: $e');
+    }
+  }
+
+  Future<void> dismissJob(int jobId) async {
+    try {
+      _dismissedJobIds.add(jobId);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+          'dismissed_jobs',
+          _dismissedJobIds.map((id) => id.toString()).toList()
+      );
+
+      notifyListeners();
+      debugPrint('Dismissed job with ID: $jobId');
+    } catch (e) {
+      debugPrint('Error dismissing job: $e');
+    }
+  }
+
+  Future<void> clearDismissedJobs() async {
+    try {
+      _dismissedJobIds.clear();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dismissed_jobs');
+
+      notifyListeners();
+      debugPrint('Cleared all dismissed jobs');
+    } catch (e) {
+      debugPrint('Error clearing dismissed jobs: $e');
+    }
+  }
+  Future<void> _notifyStatusChange({
+    required String applicantId,
+    required String jobTitle,
+    required String status,
+  }) async {
+    if (_notificationService != null) {
+      await _notificationService!.notifyStatusChange(
+        applicantId: applicantId,
+        jobTitle: jobTitle,
+        status: status,
+      );
+    }
+  }
 }

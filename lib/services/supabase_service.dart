@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/cupertino.dart';
 import 'package:supabase/supabase.dart';
 import 'package:tasklink2/config/app_config.dart';
 import 'package:tasklink2/models/user_model.dart';
@@ -32,6 +35,60 @@ class SupabaseService {
       return UserModel.fromJson(response as Map<String, dynamic>);
     } catch (e) {
       print('Error getting current user: $e');
+      return null;
+    }
+  }
+  Future<String?> uploadCompanyLogo(File imageFile, String companyName) async {
+    try {
+      final fileName = '${companyName.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.png';
+      final filePath = 'company_logos/$fileName';
+
+      // Define bucket name - use "public" as it's a common default bucket
+      const bucketName = 'public';
+
+      // Check if bucket exists
+      try {
+        // Try to get bucket info (this will throw an error if it doesn't exist)
+        await _supabaseClient.storage.getBucket(bucketName);
+        debugPrint('Bucket $bucketName exists');
+      } catch (e) {
+        debugPrint('Bucket $bucketName might not exist: $e');
+
+        // Try to create the bucket
+        try {
+          await _supabaseClient.storage.createBucket(bucketName,
+              const BucketOptions(public: true));
+          debugPrint('Created bucket $bucketName');
+        } catch (createError) {
+          debugPrint('Error creating bucket: $createError');
+          // Continue anyway - the bucket might already exist
+        }
+      }
+
+      // Upload to Supabase storage
+      try {
+        await _supabaseClient
+            .storage
+            .from(bucketName)
+            .upload(filePath, imageFile);
+
+        // If we get here, the upload was successful
+        debugPrint('Logo uploaded successfully to $bucketName/$filePath');
+
+        // Get the public URL
+        final urlResponse = await _supabaseClient
+            .storage
+            .from(bucketName)
+            .getPublicUrl(filePath);
+
+        return urlResponse;
+      } catch (uploadError) {
+        // Handle upload error
+        debugPrint('Error uploading company logo: $uploadError');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Exception uploading company logo: $e');
       return null;
     }
   }

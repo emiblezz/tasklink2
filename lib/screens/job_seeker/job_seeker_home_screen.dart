@@ -9,6 +9,7 @@ import 'package:tasklink2/services/job_service.dart';
 import 'package:tasklink2/services/profile_service.dart';
 import 'package:intl/intl.dart';
 
+import '../../widgets/job_card.dart';
 import '../../widgets/notification_badge.dart';
 import '../help_desk_screen.dart';
 import '../settings_screen.dart';
@@ -266,14 +267,17 @@ class _JobsTabState extends State<_JobsTab> {
     });
   }
 
+  // In _JobsTabState (in job_seeker_home_screen.dart)
   @override
   Widget build(BuildContext context) {
     final jobService = Provider.of<JobService>(context);
-    final List<JobModel> displayJobs = _isSearching ? _searchResults : jobService.jobs;
+    final List<JobModel> displayJobs = _isSearching
+        ? _searchResults
+        : jobService.visibleJobs; // Use visibleJobs instead of jobs
 
     return Column(
       children: [
-        // Search bar
+        // Search bar (keep your existing code)
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: TextField(
@@ -334,21 +338,47 @@ class _JobsTabState extends State<_JobsTab> {
                     },
                     child: const Text('Clear Search'),
                   ),
+                if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
+                  ElevatedButton(
+                    onPressed: () {
+                      jobService.clearDismissedJobs();
+                    },
+                    child: const Text('Show Hidden Jobs'),
+                  ),
               ],
             ),
           )
-              : RefreshIndicator(
-            onRefresh: _loadJobs,
-            child: ListView.builder(
-              itemCount: displayJobs.length,
-              itemBuilder: (context, index) {
-                final job = displayJobs[index];
-                return _JobCard(
-                  job: job,
-                  onTap: () => _viewJobDetails(job),
-                );
-              },
-            ),
+              : Stack(
+            children: [
+              RefreshIndicator(
+                onRefresh: _loadJobs,
+                child: ListView.builder(
+                  itemCount: displayJobs.length,
+                  itemBuilder: (context, index) {
+                    final job = displayJobs[index];
+                    return JobCard(
+                      job: job,
+                      onTap: () => _viewJobDetails(job),
+                      onDismiss: () {
+                        jobService.dismissJob(job.id!);
+                      },
+                    );
+                  },
+                ),
+              ),
+              if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
+                Positioned(
+                  bottom: 20,
+                  right: 20,
+                  child: FloatingActionButton.extended(
+                    onPressed: () {
+                      jobService.clearDismissedJobs();
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Show All Jobs'),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
@@ -380,6 +410,7 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
     }
   }
 
+  // In the Applications tab in JobSeekerHomeScreen.dart
   @override
   Widget build(BuildContext context) {
     final jobService = Provider.of<JobService>(context);
@@ -433,55 +464,167 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
             future: jobService.getJobById(application.jobId),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const ListTile(
-                  title: Text('Loading...'),
-                  subtitle: LinearProgressIndicator(),
+                return const Card(
+                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: ListTile(
+                    title: Text('Loading...'),
+                    subtitle: LinearProgressIndicator(),
+                  ),
                 );
               }
 
               if (snapshot.hasError || !snapshot.hasData) {
-                return const ListTile(
-                  title: Text('Error loading job details'),
-                  subtitle: Text('Job may have been removed'),
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: ListTile(
+                    title: const Text('Error loading job details'),
+                    subtitle: const Text('Job may have been removed'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        // Allow deleting applications for removed jobs
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Remove Application'),
+                            content: const Text('Remove this application from your list?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Remove'),
+                              ),
+                            ],
+                          ),
+                        ) ?? false;
+
+                        if (confirmed && application.id != null) {
+                          await jobService.deleteApplication(application.id!);
+                          _loadApplications();
+                        }
+                      },
+                    ),
+                  ),
                 );
               }
 
               final job = snapshot.data!;
-              return ListTile(
-                title: Text(job.jobTitle),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Applied: ${DateFormat('MMM dd, yyyy').format(application.dateApplied ?? DateTime.now())}'),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => JobDetailScreen(job: job),
                       ),
-                      decoration: BoxDecoration(
-                        color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        application.applicationStatus,
-                        style: TextStyle(
-                          color: _getStatusColor(application.applicationStatus),
-                          fontWeight: FontWeight.bold,
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Title and status row
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Company logo
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: job.companyLogo != null && job.companyLogo!.isNotEmpty
+                                  ? ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  job.companyLogo!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Icon(
+                                    Icons.business,
+                                    size: 24,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              )
+                                  : const Icon(
+                                Icons.business,
+                                size: 24,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+
+                            // Job title and company
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    job.jobTitle,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    job.companyName,
+                                    style: TextStyle(
+                                      color: Colors.grey.shade700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            // Application status
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                application.applicationStatus,
+                                style: TextStyle(
+                                  color: _getStatusColor(application.applicationStatus),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 12),
+
+                        // Application date
+                        Row(
+                          children: [
+                            const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Applied: ${DateFormat('MMM dd, yyyy').format(application.dateApplied ?? DateTime.now())}',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => JobDetailScreen(job: job),
-                    ),
-                  );
-                },
               );
             },
           );

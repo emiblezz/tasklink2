@@ -1,80 +1,121 @@
 class JobModel {
   final int? id;
-  final String recruiterId;
-  final String jobType;
   final String jobTitle;
+  final String companyName;
+  final String jobType;
+  final String location;
+  final double? salary; // Make sure this is included
+  final DateTime deadline;
+  final DateTime? datePosted;
+  final String status;
+  final String? recruiterId;
+  final String? companyLogo; // New field for company logo
+  final List<String>? skills;
+  final String? jobDescription;
   final String description;
   final String requirements;
-  final String status;
-  final DateTime? datePosted;
-  final DateTime deadline;
 
   JobModel({
     this.id,
-    required this.recruiterId,
-    required this.jobType,
     required this.jobTitle,
+    required this.companyName,
+    required this.jobType,
+    required this.location,
+    this.salary,
+    required this.deadline,
+    this.datePosted,
+    required this.status,
+    this.recruiterId,
+    this.companyLogo, // Add to constructor
+    this.skills,
+    this.jobDescription,
     required this.description,
     required this.requirements,
-    this.status = 'Open',
-    this.datePosted,
-    required this.deadline,
   });
 
-  // Create from JSON
+  // Update fromJson and toJson methods
   factory JobModel.fromJson(Map<String, dynamic> json) {
     return JobModel(
       id: json['job_id'],
-      recruiterId: json['recruiter_id'],
-      jobType: json['job_type'],
-      jobTitle: json['job_title'],
-      description: json['description'],
-      requirements: json['requirements'],
-      status: json['status'] ?? 'Open',
+      jobTitle: json['job_title'] ?? '',
+      companyName: json['company_name'] ?? '',
+      jobType: json['job_type'] ?? '',
+      location: json['location'] ?? '',
+      salary: json['salary'] != null ? double.parse(json['salary'].toString()) : null,
+      deadline: json['deadline'] != null
+          ? DateTime.parse(json['deadline'])
+          : DateTime.now().add(const Duration(days: 30)),
       datePosted: json['date_posted'] != null
           ? DateTime.parse(json['date_posted'])
           : null,
-      deadline: DateTime.parse(json['deadline']),
+      status: json['status'] ?? 'Open',
+      recruiterId: json['recruiter_id'],
+      companyLogo: json['company_logo'], // Parse from JSON
+      skills: json['skills'] != null
+          ? (json['skills'] is String
+          ? json['skills'].split(',')
+          : List<String>.from(json['skills']))
+          : null,
+      jobDescription: json['job_description'],
+      description: json['description'] ?? '',
+      requirements: json['requirements'] ?? '',
     );
   }
 
-  // Convert to JSON
   Map<String, dynamic> toJson() {
     return {
-      if (id != null) 'job_id': id,
-      'recruiter_id': recruiterId,
-      'job_type': jobType,
+      'job_id': id,
       'job_title': jobTitle,
+      'company_name': companyName,
+      'job_type': jobType,
+      'location': location,
+      'salary': salary,
+      'deadline': deadline.toIso8601String(),
+      'date_posted': datePosted?.toIso8601String(),
+      'status': status,
+      'recruiter_id': recruiterId,
+      'company_logo': companyLogo, // Include in JSON
+      'skills': skills != null ? skills!.join(',') : null,
+      'job_description': jobDescription,
       'description': description,
       'requirements': requirements,
-      'status': status,
-      if (datePosted != null) 'date_posted': datePosted!.toIso8601String(),
-      'deadline': deadline.toIso8601String(),
     };
   }
 
-  // Create a copy with updated fields
+  // Update copyWith method too
   JobModel copyWith({
     int? id,
-    String? recruiterId,
-    String? jobType,
     String? jobTitle,
+    String? companyName,
+    String? jobType,
+    String? location,
+    double? salary,
+    DateTime? deadline,
+    DateTime? datePosted,
+    String? status,
+    String? recruiterId,
+    String? companyLogo,
+    List<String>? skills,
+    String? jobDescription,
     String? description,
     String? requirements,
-    String? status,
-    DateTime? datePosted,
-    DateTime? deadline,
   }) {
     return JobModel(
       id: id ?? this.id,
-      recruiterId: recruiterId ?? this.recruiterId,
-      jobType: jobType ?? this.jobType,
       jobTitle: jobTitle ?? this.jobTitle,
+      companyName: companyName ?? this.companyName,
+      jobType: jobType ?? this.jobType,
+      location: location ?? this.location,
+      salary: salary ?? this.salary,
+      deadline: deadline ?? this.deadline,
+      datePosted: datePosted ?? this.datePosted,
+      status: status ?? this.status,
+      recruiterId: recruiterId ?? this.recruiterId,
+      companyLogo: companyLogo ?? this.companyLogo,
+      skills: skills ?? this.skills,
+      jobDescription: jobDescription ?? this.jobDescription,
       description: description ?? this.description,
       requirements: requirements ?? this.requirements,
-      status: status ?? this.status,
-      datePosted: datePosted ?? this.datePosted,
-      deadline: deadline ?? this.deadline,
     );
   }
 }

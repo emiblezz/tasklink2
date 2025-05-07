@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tasklink2/models/application_model.dart';
 import 'package:tasklink2/models/job_model.dart';
 import 'package:tasklink2/models/user_model.dart';
@@ -8,9 +9,11 @@ import 'package:tasklink2/screens/auth/login_screen.dart';
 import 'package:tasklink2/screens/job_detail_screen.dart';
 import 'package:tasklink2/screens/recruiter/create_job_screen.dart';
 import 'package:tasklink2/screens/recruiter/cv_ranking_screen.dart';
+import 'package:tasklink2/screens/recruiter/recruiter_jobs_screen.dart';
 import 'package:tasklink2/services/auth_service.dart';
 import 'package:tasklink2/services/job_service.dart';
 import 'package:tasklink2/services/supabase_service.dart';
+import 'package:tasklink2/widgets/job_card.dart';
 
 import '../../widgets/notification_badge.dart';
 import '../help_desk_screen.dart';
@@ -64,6 +67,21 @@ class _RecruiterHomeScreenState extends State<RecruiterHomeScreen> {
       appBar: AppBar(
         title: const Text('TaskLink Recruiter'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.work_outline),
+            tooltip: 'Manage Job Postings',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const RecruiterJobsScreen(),
+                ),
+              ).then((_) {
+                // Refresh data when returning from jobs screen
+                _loadInitialData();
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
@@ -222,7 +240,27 @@ class _DashboardTab extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
+
+          // Add "Manage Jobs" button
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const RecruiterJobsScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.work_outline),
+            label: const Text('Manage Job Postings'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 50),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 24),
 
           // Recent activity section
           Text(
@@ -337,6 +375,32 @@ class _JobPostingsTabState extends State<_JobPostingsTab> {
               fontWeight: FontWeight.bold,
             ),
           ),
+          const SizedBox(height: 16),
+
+          // Add "Manage All Jobs" button
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const RecruiterJobsScreen(),
+                ),
+              ).then((_) {
+                // Refresh data when returning
+                final authService = Provider.of<AuthService>(context, listen: false);
+                final jobService = Provider.of<JobService>(context, listen: false);
+                if (authService.currentUser != null) {
+                  jobService.fetchRecruiterJobs(authService.currentUser!.id);
+                }
+              });
+            },
+            icon: const Icon(Icons.dashboard),
+            label: const Text('Manage All Jobs'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.grey.shade700,
+            ),
+          ),
+
           const SizedBox(height: 16),
 
           // Status filter
@@ -482,70 +546,70 @@ class _JobPostingsTabState extends State<_JobPostingsTab> {
                             ],
                           ),
                           const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Chip(
-                            label: Text(job.status),
-                            backgroundColor: job.status == 'Open'
-                                ? Colors.green.withOpacity(0.1)
-                                : Colors.red.withOpacity(0.1),
-                            labelStyle: TextStyle(
-                              color: job.status == 'Open' ? Colors.green : Colors.red,
-                            ),
-                          ),
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: [
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.edit, size: 16),
-                                    label: const Text('Edit'),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => CreateJobScreen(job: job),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.auto_awesome, size: 16),
-                                    label: const Text('Rank CVs'),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => CVRankingScreen(job: job),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.visibility, size: 16),
-                                    label: const Text('View'),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => JobDetailScreen(
-                                            job: job,
-                                            isRecruiter: true,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Chip(
+                                label: Text(job.status),
+                                backgroundColor: job.status == 'Open'
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.red.withOpacity(0.1),
+                                labelStyle: TextStyle(
+                                  color: job.status == 'Open' ? Colors.green : Colors.red,
+                                ),
                               ),
-                            ),
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: [
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.edit, size: 16),
+                                        label: const Text('Edit'),
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => CreateJobScreen(job: job),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.auto_awesome, size: 16),
+                                        label: const Text('Rank CVs'),
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => CVRankingScreen(job: job),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.visibility, size: 16),
+                                        label: const Text('View'),
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => JobDetailScreen(
+                                                job: job,
+                                                isRecruiter: true,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
                         ],
                       ),
                     ),
@@ -704,11 +768,35 @@ class _CandidatesTabState extends State<_CandidatesTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 16),
-          Text(
-            'Applications',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Applications',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RecruiterJobsScreen(),
+                    ),
+                  ).then((_) {
+                    // Refresh data when returning
+                    _loadJobs();
+                  });
+                },
+                icon: const Icon(Icons.work),
+                label: const Text('Manage Jobs'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey.shade700,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
 
@@ -1313,6 +1401,20 @@ class _ProfileTab extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const HelpDeskScreen(isRecruiter: true),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.work_outline),
+                  title: const Text('Manage Job Postings'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const RecruiterJobsScreen(),
                       ),
                     );
                   },
