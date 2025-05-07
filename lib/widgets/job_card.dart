@@ -17,6 +17,48 @@ class JobCard extends StatelessWidget {
     this.isDismissible = true,
   }) : super(key: key);
 
+  // Helper to format salary with currency
+  String _formatSalary(dynamic salary) {
+    if (salary == null) {
+      return 'Salary not specified';
+    }
+
+    String salaryText = salary.toString();
+    
+    // Check if salary already includes a currency code
+    for (String currency in ['UGX', 'USD', 'EUR', 'GBP']) {
+      if (salaryText.startsWith('$currency ')) {
+        // Already formatted with currency
+        return salaryText;
+      }
+    }
+    
+    // Default formatting for numeric values (use local currency)
+    try {
+      double amount = double.parse(salaryText);
+      return NumberFormat.currency(symbol: 'UGX ', decimalDigits: 0).format(amount);
+    } catch (e) {
+      // If not parsable as number, just return the text
+      return salaryText;
+    }
+  }
+
+  String _getTimeAgo(DateTime dateTime) {
+    final difference = DateTime.now().difference(dateTime);
+
+    if (difference.inDays > 7) {
+      return DateFormat('MMM dd, yyyy').format(dateTime);
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+    } else {
+      return 'just now';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget cardContent = Card(
@@ -43,22 +85,22 @@ class JobCard extends StatelessWidget {
                     ),
                     child: job.companyLogo != null && job.companyLogo!.isNotEmpty
                         ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        job.companyLogo!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => const Icon(
-                          Icons.business,
-                          size: 30,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    )
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              job.companyLogo!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => const Icon(
+                                Icons.business,
+                                size: 30,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          )
                         : const Icon(
-                      Icons.business,
-                      size: 30,
-                      color: Colors.grey,
-                    ),
+                            Icons.business,
+                            size: 30,
+                            color: Colors.grey,
+                          ),
                   ),
                   const SizedBox(width: 12),
 
@@ -96,20 +138,72 @@ class JobCard extends StatelessWidget {
                 ],
               ),
 
-              // Salary (if available)
+              // Salary (if available) - Updated to use _formatSalary helper
               if (job.salary != null) ...[
                 const SizedBox(height: 12),
-                Text(
-                  'Salary: ${NumberFormat.currency(symbol: '\$').format(job.salary)}',
-                  style: TextStyle(
-                    color: Colors.green.shade700,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 16,
-                  ),
+                Row(
+                  children: [
+                    Icon(Icons.currency_exchange, size: 16, color: Colors.green.shade700),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Salary: ${_formatSalary(job.salary)}',
+                      style: TextStyle(
+                        color: Colors.green.shade700,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
                 ),
               ],
 
               const SizedBox(height: 12),
+              
+              // Skills section (if available)
+              if (job.skills != null && job.skills!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Skills:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: job.skills!.take(3).map((skill) => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      skill,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  )).toList(),
+                ),
+                
+                // Show "more skills" indicator if there are more than 3
+                if (job.skills!.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '+${job.skills!.length - 3} more skills',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+              ],
 
               // Job type and deadline row
               Row(
@@ -161,43 +255,6 @@ class JobCard extends StatelessWidget {
         ),
       ),
     );
-    // Add company logo
-    if (job.companyLogo != null && job.companyLogo!.isNotEmpty)
-      Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            job.companyLogo!,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.business, color: Colors.grey),
-            ),
-          ),
-        ),
-      );
-
-// Add company name
-    Text(job.companyName);
-
-// Add salary if available
-    if (job.salary != null)[
-    const Icon(Icons.attach_money, size: 16),
-    Text(
-    NumberFormat.currency(symbol: '\$', decimalDigits: 0).format(job.salary),
-    style: TextStyle(color: Colors.green.shade700),
-    ),
-    ];
 
     // If dismissible is requested, wrap the card in a Dismissible widget
     if (isDismissible && onDismiss != null) {
@@ -237,21 +294,5 @@ class JobCard extends StatelessWidget {
     }
 
     return cardContent;
-  }
-
-  String _getTimeAgo(DateTime dateTime) {
-    final difference = DateTime.now().difference(dateTime);
-
-    if (difference.inDays > 7) {
-      return DateFormat('MMM dd, yyyy').format(dateTime);
-    } else if (difference.inDays > 0) {
-      return '${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
-    } else {
-      return 'just now';
-    }
   }
 }
