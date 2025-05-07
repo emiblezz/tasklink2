@@ -142,8 +142,32 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  @override
-  // In JobDetailScreen
+  // Helper to handle displaying salary with correct currency
+  String _formatSalary(dynamic salary) {
+    if (salary == null) {
+      return 'Not specified';
+    }
+
+    String salaryText = salary.toString();
+
+    // Check if salary already includes a currency code
+    for (String currency in ['UGX', 'USD', 'EUR', 'GBP']) {
+      if (salaryText.startsWith('$currency ')) {
+        // Already formatted with currency
+        return salaryText;
+      }
+    }
+
+    // Default formatting for numeric values (use local currency)
+    try {
+      double amount = double.parse(salaryText);
+      return NumberFormat.currency(symbol: 'UGX ').format(amount);
+    } catch (e) {
+      // If not parsable as number, just return the text
+      return salaryText;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -241,7 +265,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Salary information
+            // Salary information - UPDATED FOR DIFFERENT CURRENCIES
             if (widget.job.salary != null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -252,10 +276,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.attach_money, color: Colors.green.shade700),
+                    Icon(Icons.currency_exchange, color: Colors.green.shade700),
                     const SizedBox(width: 8),
                     Text(
-                      'Salary: ${NumberFormat.currency(symbol: '\$').format(widget.job.salary)}',
+                      'Salary: ${_formatSalary(widget.job.salary)}',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -291,6 +315,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ],
             ),
             const SizedBox(height: 16),
+
+            // Skills - NEW SECTION
+            if (widget.job.skills != null && widget.job.skills!.isNotEmpty) ...[
+              const Text(
+                'Skills Required',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.job.skills!.map((skill) => Chip(
+                  label: Text(skill),
+                  backgroundColor: Colors.blue.shade50,
+                  labelStyle: TextStyle(
+                    color: Colors.blue.shade700,
+                  ),
+                )).toList(),
+              ),
+              const SizedBox(height: 24),
+            ],
 
             // Deadline
             Row(
