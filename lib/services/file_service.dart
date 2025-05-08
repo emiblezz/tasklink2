@@ -9,12 +9,13 @@ import 'package:path/path.dart' as path;
 
 class FileService {
   // Pick CV files (PDF, DOC, DOCX)
+  // Updated pickCV method for FileService class
   static Future<String?> pickCV() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'txt'],
-        withData: true, // Ensures we get the file data directly
+        withData: true,
       );
 
       if (result == null || result.files.isEmpty) {
@@ -37,16 +38,23 @@ class FileService {
         throw Exception('User not logged in');
       }
 
-      // Don't try to create the bucket programmatically
+      // Print debug info about the user and auth state
+      final currentSession = AppConfig().supabaseClient.auth.currentSession;
+      final accessToken = currentSession?.accessToken;
+      debugPrint('Current user ID: $userId');
+      debugPrint('Has valid session: ${currentSession != null}');
+      debugPrint('Access token available: ${accessToken != null && accessToken.isNotEmpty}');
 
-      // Use plain text for simplicity if you don't have the backend extract_text endpoint yet
+      // Create a simple storage path
+      // Avoid nested folders for now to rule out permission issues
+      final uniqueFileName = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
+      final storagePath = uniqueFileName; // Note: No folder structure, just the file name
+
+      // Extract text content as before
       String resumeText = "";
-
       if (fileName.toLowerCase().endsWith('.txt')) {
-        // For text files, we can extract the content directly
         resumeText = utf8.decode(fileBytes);
       } else {
-        // For other files, use a placeholder text until backend is fully implemented
         resumeText = "Resume content for $fileName. This is a placeholder that would be replaced with actual extracted text from the backend.";
       }
 
@@ -54,37 +62,74 @@ class FileService {
       String? fileUrl;
       bool isUploaded = false;
 
+      // First, verify we can list buckets
       try {
-        // Upload file to storage
-        final storagePath = '$userId/$fileName';
-        debugPrint('Uploading to storage path: $storagePath');
+        final buckets = await AppConfig().supabaseClient.storage.listBuckets();
+        debugPrint('Available buckets: ${buckets.map((b) => b.name).join(', ')}');
+
+        final bucketExists = buckets.any((b) => b.name == 'resume');
+        debugPrint('Resume bucket exists: $bucketExists');
+
+        if (!bucketExists) {
+          debugPrint('Warning: resume bucket not found in available buckets');
+        }
+      } catch (e) {
+        debugPrint('Error listing buckets: $e');
+      }
+
+      try {
+        // Try to upload the file
+        debugPrint('Attempting to upload file to bucket: resume, path: $storagePath');
+        debugPrint('File size: ${fileBytes.length} bytes');
 
         final uploadResponse = await AppConfig().supabaseClient.storage
-            .from('resumes')
+            .from('resume')
             .uploadBinary(
           storagePath,
           fileBytes,
           fileOptions: FileOptions(
             contentType: _getContentType(fileName),
+            // Specify cacheControl to make sure it's not cached incorrectly
+            cacheControl: '3600',
           ),
         );
 
-        debugPrint('Upload successful: $uploadResponse');
+        debugPrint('Upload successful! Response: $uploadResponse');
 
         // Get the public URL
         fileUrl = AppConfig().supabaseClient.storage
-            .from('resumes')
+            .from('resume')
             .getPublicUrl(storagePath);
 
         debugPrint('File public URL: $fileUrl');
         isUploaded = true;
+
+        // Verify the file exists by trying to get metadata
+        try {
+          final fileInfo = await AppConfig().supabaseClient.storage
+              .from('resume')
+              .list(path: '');
+
+          debugPrint('Files in bucket: ${fileInfo.map((f) => f.name).join(', ')}');
+
+          final fileExists = fileInfo.any((f) => f.name == storagePath);
+          debugPrint('Uploaded file found in bucket: $fileExists');
+        } catch (e) {
+          debugPrint('Error listing files in bucket: $e');
+        }
       } catch (storageError) {
-        debugPrint('Storage upload error: $storageError');
-        // Continue with local processing even if storage fails
+        debugPrint('❌ Storage upload error: $storageError');
+
+        // Detailed error logging
+        if (storageError is StorageException) {
+          debugPrint('StorageException details: message=${storageError.message}, statusCode=${storageError.statusCode}, error=${storageError.error}');
+        }
+
+        // Fallback URL if storage fails
         fileUrl = 'https://example.com/fallback/$fileName#fallback';
       }
 
-      // Store the text in Supabase database
+      // Store the text in database as before
       try {
         debugPrint('Storing resume text in database for user: $userId');
         await AppConfig().supabaseClient.from('resumes').insert({
@@ -93,16 +138,46 @@ class FileService {
           'filename': fileName,
           'uploaded_date': DateTime.now().toIso8601String(),
         });
-        debugPrint('Resume text stored successfully');
+        debugPrint('Resume text stored successfully in resumes table');
+
+        // Update profile
+        try {
+          final existingProfile = await AppConfig().supabaseClient
+              .from('jobseeker_profiles')
+              .select('profile_id')
+              .eq('user_id', userId)
+              .limit(1);
+
+          if (existingProfile.isNotEmpty) {
+            debugPrint('Updating existing profile with CV: $fileUrl');
+            await AppConfig().supabaseClient
+                .from('jobseeker_profiles')
+                .update({'cv': fileUrl})
+                .eq('user_id', userId);
+            debugPrint('Profile updated successfully');
+          } else {
+            debugPrint('Creating new profile with CV: $fileUrl');
+            await AppConfig().supabaseClient
+                .from('jobseeker_profiles')
+                .insert({
+              'user_id': userId,
+              'cv': fileUrl,
+              'skills': '',
+              'experience': '',
+              'education': '',
+            });
+            debugPrint('New profile created successfully');
+          }
+        } catch (profileError) {
+          debugPrint('Error updating profile: $profileError');
+        }
       } catch (e) {
         debugPrint('Error storing resume text: $e');
-        // Continue even if storing fails
       }
 
-      // Return the URL (or fallback URL) to be stored in the user profile
       return fileUrl;
     } catch (e) {
-      debugPrint('Error picking file: $e');
+      debugPrint('Error in pickCV: $e');
       return null;
     }
   }

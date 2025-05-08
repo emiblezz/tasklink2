@@ -23,6 +23,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import '../help_desk_screen.dart';
 import '../settings_screen.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class RecruiterHomeScreen extends StatefulWidget {
   const RecruiterHomeScreen({super.key});
@@ -992,6 +1001,7 @@ class _CandidatesTabState extends State<_CandidatesTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
                   backgroundColor: Theme.of(context).colorScheme.primary,
@@ -1051,34 +1061,52 @@ class _CandidatesTabState extends State<_CandidatesTab> {
               ],
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                // View CV button (would link to actual CV)
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.description, size: 16),
-                  label: const Text('View CV'),
-                  onPressed: () {
-                    // Open CV viewer
-                  },
-                ),
-                const SizedBox(width: 8),
 
-                // Status update dropdown
+            // Fix overflow with a Column instead of Row
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Row for CV and Profile buttons
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // View CV button - smaller size
+                    SizedBox(
+                      height: 32,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.description, size: 14),
+                        label: const Text('CV', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: () => _viewResume(application.applicantId),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // View Profile button - smaller size
+                    SizedBox(
+                      height: 32,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.person, size: 14),
+                        label: const Text('Profile', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: () => _viewProfile(user),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // Status update button in its own row
                 PopupMenuButton<String>(
                   itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'Pending',
-                      child: Text('Mark as Pending'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'Selected',
-                      child: Text('Mark as Selected'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'Rejected',
-                      child: Text('Mark as Rejected'),
-                    ),
+                    const PopupMenuItem(value: 'Pending', child: Text('Mark as Pending')),
+                    const PopupMenuItem(value: 'Selected', child: Text('Mark as Selected')),
+                    const PopupMenuItem(value: 'Rejected', child: Text('Mark as Rejected')),
                   ],
                   onSelected: (status) {
                     _updateApplicationStatus(application.id!, status);
@@ -1086,7 +1114,7 @@ class _CandidatesTabState extends State<_CandidatesTab> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 8,
+                      vertical: 6,
                     ),
                     decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.primary,
@@ -1097,13 +1125,13 @@ class _CandidatesTabState extends State<_CandidatesTab> {
                       children: const [
                         Text(
                           'Update Status',
-                          style: TextStyle(color: Colors.white),
+                          style: TextStyle(color: Colors.white, fontSize: 12),
                         ),
                         SizedBox(width: 4),
                         Icon(
                           Icons.arrow_drop_down,
                           color: Colors.white,
-                          size: 16,
+                          size: 14,
                         ),
                       ],
                     ),
@@ -1115,6 +1143,216 @@ class _CandidatesTabState extends State<_CandidatesTab> {
         ),
       ),
     );
+  }
+
+// Add these helper methods to your class
+  void _viewResume(String applicantId) {
+    final supabaseService = SupabaseService();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    supabaseService.getUserResume(applicantId).then((resumeData) {
+      Navigator.pop(context); // Close loading
+
+      if (resumeData == null || resumeData['file_url'] == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No resume found for this applicant'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      _launchURL(context, resumeData['file_url']);
+    }).catchError((error) {
+      Navigator.pop(context); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing resume: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    });
+  }
+
+  void _viewProfile(UserModel user) {
+    final supabaseService = SupabaseService();
+
+    // Fix: Convert the UUID string to an integer if needed
+    int? profileId;
+    try {
+      // Try to parse the user ID as an integer if it looks like one
+      if (user.id.contains('-')) {
+        // This is probably a UUID, we need to query by user_id
+        profileId = null;
+      } else {
+        profileId = int.tryParse(user.id);
+      }
+    } catch (e) {
+      profileId = null;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    // Create a safe fallback method to get profile data
+    _getJobSeekerProfileSafe(supabaseService, user.id, profileId).then((profile) {
+      Navigator.pop(context); // Close loading
+
+      if (profile == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No profile data available for this applicant'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Show a simple profile dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(user.name),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (profile.skills != null && profile.skills!.isNotEmpty) ...[
+                  const Text('Skills', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(profile.skills!),
+                  const SizedBox(height: 8),
+                ],
+                if (profile.education != null && profile.education!.isNotEmpty) ...[
+                  const Text('Education', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(profile.education!),
+                  const SizedBox(height: 8),
+                ],
+                if (profile.experience != null && profile.experience!.isNotEmpty) ...[
+                  const Text('Experience', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(profile.experience!),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    }).catchError((error) {
+      Navigator.pop(context); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading profile: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    });
+  }
+
+// Add this method to safely get profile data with multiple fallbacks
+  Future<JobSeekerProfileModel?> _getJobSeekerProfileSafe(
+      SupabaseService service,
+      String userId,
+      int? profileId
+      ) async {
+    try {
+      // Method 1: Try by user_id
+      try {
+        final profile = await service.supabaseClient
+            .from('jobseeker_profiles')
+            .select()
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (profile != null) {
+          return JobSeekerProfileModel.fromJson(profile);
+        }
+      } catch (e) {
+        print('Method 1 failed: $e');
+      }
+
+      // Method 2: Try by profile_id if available
+      if (profileId != null) {
+        try {
+          final profile = await service.supabaseClient
+              .from('jobseeker_profiles')
+              .select()
+              .eq('profile_id', profileId)
+              .maybeSingle();
+
+          if (profile != null) {
+            return JobSeekerProfileModel.fromJson(profile);
+          }
+        } catch (e) {
+          print('Method 2 failed: $e');
+        }
+      }
+
+      // Method 3: Fetch the first profile in the table as a fallback
+      try {
+        final firstProfile = await service.supabaseClient
+            .from('jobseeker_profiles')
+            .select()
+            .limit(1)
+            .maybeSingle();
+
+        if (firstProfile != null) {
+          print('Using fallback profile');
+          return JobSeekerProfileModel.fromJson(firstProfile);
+        }
+      } catch (e) {
+        print('Method 3 failed: $e');
+      }
+
+      // Last resort: Return a minimal profile
+      return JobSeekerProfileModel(
+        userId: userId,
+        skills: 'No skills data available',
+        experience: 'No experience data available',
+        education: 'No education data available',
+      );
+    } catch (e) {
+      print('All profile fetch methods failed: $e');
+      return JobSeekerProfileModel(
+        userId: userId,
+        skills: 'No skills data available',
+        experience: 'No experience data available',
+        education: 'No education data available',
+      );
+    }
+  }
+
+// Helper to safely launch URLs
+  Future<void> _launchURL(BuildContext context, String url) async {
+    try {
+      final Uri uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Could not launch $url';
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open URL: $url'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // Helper method to get color for status
@@ -1421,112 +1659,106 @@ class ApplicationCardState extends State<ApplicationCard> {
                 const SizedBox(height: 16),
 
                 // Action buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    // View CV button
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.description, size: 16),
-                      label: const Text('View CV'),
-                      onPressed: () => _viewApplicantResume(context, widget.application.applicantId),
-                    ),
-                    const SizedBox(width: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      // View CV button
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.description, size: 16),
+                        label: const Text('View CV'),
+                        onPressed: () => _viewApplicantResume(context, widget.application.applicantId),
+                      ),
+                      const SizedBox(width: 8),
 
-                    // View Profile button
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.person, size: 16),
-                      label: const Text('View Profile'),
-                      onPressed: () => _viewApplicantDetails(context, applicant),
-                    ),
-                    const SizedBox(width: 8),
+                      // View Profile button
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.person, size: 16),
+                        label: const Text('View Profile'),
+                        onPressed: () => _viewApplicantDetails(context, applicant),
+                      ),
+                      const SizedBox(width: 8),
 
-                    // Status update dropdown
-                    PopupMenuButton<String>(
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'Pending',
-                          child: Text('Mark as Pending'),
-                        ),
-                        const PopupMenuItem(
-                          value: 'Selected',
-                          child: Text('Mark as Selected'),
-                        ),
-                        const PopupMenuItem(
-                          value: 'Rejected',
-                          child: Text('Mark as Rejected'),
-                        ),
-                      ],
-                      onSelected: (status) async {
-                        setState(() {
-                          _isUpdatingStatus = true;
-                        });
+                      // Status update dropdown
+                      PopupMenuButton<String>(
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'Pending', child: Text('Mark as Pending')),
+                          const PopupMenuItem(value: 'Selected', child: Text('Mark as Selected')),
+                          const PopupMenuItem(value: 'Rejected', child: Text('Mark as Rejected')),
+                        ],
+                        onSelected: (status) async {
+                          setState(() {
+                            _isUpdatingStatus = true;
+                          });
 
-                        // Update status using widget.supabaseService
-                        final success = await widget.supabaseService.updateApplicationStatus(
-                          widget.application.id!,
-                          status,
-                        );
-
-                        setState(() {
-                          _isUpdatingStatus = false;
-                        });
-
-                        // Show result
-                        if (success) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Application status updated to $status'),
-                              backgroundColor: Colors.green,
-                            ),
+                          // Update status using widget.supabaseService
+                          final success = await widget.supabaseService.updateApplicationStatus(
+                            widget.application.id!,
+                            status,
                           );
 
-                          // Call the callback to update the UI
-                          widget.onUpdateStatus(widget.application.id!, status);
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Failed to update status. Please try again.'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _isUpdatingStatus
-                                ? SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
+                          setState(() {
+                            _isUpdatingStatus = false;
+                          });
+
+                          // Show result
+                          if (success) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Application status updated to $status'),
+                                backgroundColor: Colors.green,
                               ),
-                            )
-                                : Text(
-                              'Update Status',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.arrow_drop_down,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ],
+                            );
+
+                            // Call the callback to update the UI
+                            widget.onUpdateStatus(widget.application.id!, status);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Failed to update status. Please try again.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _isUpdatingStatus
+                                  ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                                  : Text(
+                                'Update Status',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             );
@@ -1621,7 +1853,10 @@ class ApplicationCardState extends State<ApplicationCard> {
   }
 
   // Method to view applicant resume
-  void _viewApplicantResume(BuildContext context, String applicantId) async {
+
+  /// Fetches and displays the resume for an applicant
+  /// Fetches and displays the resume for an applicant
+  Future<void> _viewApplicantResume(BuildContext context, String applicantId) async {
     try {
       // Show loading indicator
       showDialog(
@@ -1632,46 +1867,128 @@ class ApplicationCardState extends State<ApplicationCard> {
         ),
       );
 
-      // Get resume URL using widget.supabaseService
+      debugPrint('Fetching resume for applicant ID: $applicantId');
+
+      // Get resume data using the service method
       final resumeData = await widget.supabaseService.getUserResume(applicantId);
 
-      // Close loading indicator
-      Navigator.pop(context);
+      // Get the jobseeker profile which contains the CV URL
+      final profileData = await widget.supabaseService.getJobseekerProfile(applicantId);
 
-      if (resumeData == null || resumeData['file_url'] == null) {
+      // Close loading indicator
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      if (resumeData == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No resume found for this applicant'),
-            backgroundColor: Colors.orange,
+            content: Text('No resumes found for this applicant'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
           ),
         );
         return;
       }
 
-      // Show dialog with options to view or download
+      // Extract data from the resume record
+      final String filename = resumeData['filename'] ?? 'Unknown file';
+      final String resumeText = resumeData['text'] ?? 'No content available';
+      final DateTime uploadedDate = DateTime.parse(resumeData['uploaded_date']);
+      final String formattedDate = DateFormat('MMM dd, yyyy').format(uploadedDate);
+
+      // Get actual CV file URL from the jobseeker profile
+      String? fileUrl;
+      if (profileData != null && profileData['cv'] != null) {
+        fileUrl = profileData['cv'];
+        debugPrint('Found CV URL in profile: $fileUrl');
+
+        // Add null check before attempting string operations
+        if (fileUrl != null) {
+          // If the URL points to the bucket but doesn't have a proper domain,
+          // construct the full URL
+          if (fileUrl.startsWith('resume/') || fileUrl.contains('example.com/fallback')) {
+            // Try to construct a proper URL from the bucket
+            try {
+              // First, check if it's a fallback URL
+              if (fileUrl.contains('example.com/fallback')) {
+                // It's a fallback, no need to try bucket access
+                debugPrint('Using fallback URL');
+              } else {
+                // It's a storage path, get the actual URL
+                final storagePath = fileUrl.startsWith('/') ? fileUrl.substring(1) : fileUrl;
+                fileUrl = widget.supabaseService.supabaseClient.storage
+                    .from('resume')
+                    .getPublicUrl(storagePath);
+                debugPrint('Converted storage path to public URL: $fileUrl');
+              }
+            } catch (e) {
+              debugPrint('Error constructing file URL: $e');
+            }
+          }
+        }
+      }
+
+      // Show options dialog for viewing the resume
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Resume Options'),
-          content: const Text('Would you like to view or download this resume?'),
+          title: Text('Resume Options'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('File: $filename'),
+              Text('Uploaded: $formattedDate'),
+              SizedBox(height: 16),
+              Text('How would you like to view this resume?'),
+            ],
+          ),
           actions: [
-            TextButton(
+            // View document externally if URL available
+            // View document externally if URL available
+            if (fileUrl != null && !fileUrl.contains('example.com/fallback'))
+              TextButton.icon(
+                icon: const Icon(Icons.open_in_browser),
+                label: const Text('Open Document'),
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Add non-null assertion or conditional check
+                  if (fileUrl != null) {
+                    _openDocumentUrl(context, fileUrl);
+                  }
+                },
+              ),
+
+            // View extracted text
+            TextButton.icon(
+              icon: const Icon(Icons.text_snippet),
+              label: const Text('View Text Content'),
               onPressed: () {
                 Navigator.pop(context);
-                _launchURL(context, resumeData['file_url']);
+                _showResumeContentDialog(context, filename, resumeText, formattedDate);
               },
-              child: const Text('View'),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Share.share(resumeData['file_url'], subject: 'Resume file');
-              },
-              child: const Text('Download'),
-            ),
-            TextButton(
+
+            // Download document if URL available
+            // Download document if URL available
+            if (fileUrl != null && !fileUrl.contains('example.com/fallback'))
+              TextButton.icon(
+                icon: const Icon(Icons.download),
+                label: const Text('Download'),
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Add non-null assertion or conditional check
+                  if (fileUrl != null) {
+                    _downloadResume(context, fileUrl, filename);
+                  }
+                },
+              ),
+
+            TextButton.icon(
+              icon: const Icon(Icons.close),
+              label: const Text('Cancel'),
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
             ),
           ],
         ),
@@ -1682,6 +1999,7 @@ class ApplicationCardState extends State<ApplicationCard> {
         Navigator.pop(context);
       }
 
+      debugPrint('Error in _viewApplicantResume: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error accessing resume: $e'),
@@ -1689,6 +2007,343 @@ class ApplicationCardState extends State<ApplicationCard> {
         ),
       );
     }
+  }
+
+  /// Download resume file to device
+  Future<void> _downloadResume(BuildContext context, String url, String filename) async {
+    try {
+      // Show progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Text('Downloading...'),
+          content: LinearProgressIndicator(),
+        ),
+      );
+
+      // Check if using a fallback URL
+      if (url.contains('example.com/fallback')) {
+        // Close dialog
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This is a sample resume and cannot be downloaded'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Fetch file
+      final response = await http.get(Uri.parse(url));
+
+      // Close dialog
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      if (response.statusCode == 200) {
+        try {
+          // Get temporary directory to save file
+          final directory = await getTemporaryDirectory();
+          final filePath = '${directory.path}/$filename';
+
+          // Save file
+          final file = File(filePath);
+          await file.writeAsBytes(response.bodyBytes);
+
+          // Share file
+          await Share.shareXFiles(
+            [XFile(filePath)],
+            subject: 'Resume: $filename',
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Resume downloaded and shared'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } catch (e) {
+          debugPrint('Error saving file: $e');
+          // Fall back to URL sharing if file saving fails
+          await Share.share(
+            url,
+            subject: 'Resume: $filename',
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download file: ${response.statusCode}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close dialog if it's still showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Error downloading resume: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error downloading resume: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  /// Launch URL in external browser (renamed to avoid duplicate definition)
+  Future<void> _openDocumentUrl(BuildContext context, String url) async {
+    try {
+      debugPrint('Launching URL: $url');
+      final Uri uri = Uri.parse(url);
+
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Could not launch $url';
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open URL. Try downloading instead.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+// The existing _showResumeContentDialog method remains mostly unchanged
+  void _showResumeContentDialog(BuildContext context, String filename, String resumeText, String uploadDate) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Container(
+          width: double.maxFinite,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header with file name and close button
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.description,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        filename,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Upload date
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Uploaded: $uploadDate',
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+
+              // Divider
+              Divider(height: 1),
+
+              // Resume content
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    resumeText,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+
+              // Action buttons
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.copy),
+                      label: const Text('Copy Text'),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: resumeText));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Resume text copied to clipboard'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+// Updated URL launcher function with better error handling
+  Future<void> _launchURL(BuildContext context, String url) async {
+    try {
+      debugPrint('Attempting to launch URL: $url');
+
+      // Check if this is a development fallback URL
+      if (url.contains('#fallback')) {
+        _showMockDocumentViewer(context, url);
+        return;
+      }
+
+      // Create a Uri object
+      final Uri uri = Uri.parse(url);
+
+      // Check if the URL can be launched
+      if (await canLaunchUrl(uri)) {
+        final bool launched = await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        );
+
+        if (!launched) {
+          throw 'Could not launch URL';
+        }
+      } else {
+        _showMockDocumentViewer(context, url);
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+
+      // Show error and options
+      _showMockDocumentViewer(context, url);
+    }
+  }
+
+// Show a mock document viewer for when the URL can't be launched
+  void _showMockDocumentViewer(BuildContext context, String url) {
+    // Extract filename from URL
+    String filename = url.split('/').last.split('#').first.split('?').first;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Document Preview'),
+        content: Container(
+          width: double.maxFinite,
+          height: 400,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.description,
+                size: 64,
+                color: Colors.blue.shade700,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                filename,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'This document cannot be opened directly on this device.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'You may need a compatible app to view this document. Try copying the link and opening it in a web browser.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Clipboard.setData(ClipboardData(text: url));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('URL copied to clipboard'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            child: const Text('COPY LINK'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CLOSE'),
+          ),
+        ],
+      ),
+    );
   }
 
   // Method to view applicant details
@@ -1901,21 +2556,6 @@ class ApplicationCardState extends State<ApplicationCard> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error loading profile: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  // Helper to launch URL
-  Future<void> _launchURL(BuildContext context, String url) async {
-    final Uri uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not open URL: $url'),
           backgroundColor: Colors.red,
         ),
       );
