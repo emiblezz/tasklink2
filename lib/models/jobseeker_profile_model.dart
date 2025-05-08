@@ -5,6 +5,8 @@ class JobSeekerProfileModel {
   final String? skills;
   final String? experience;
   final String? education;
+  final String? summary;
+  final String? profileImage;
   final String? linkedinProfile;
 
   JobSeekerProfileModel({
@@ -15,6 +17,8 @@ class JobSeekerProfileModel {
     this.experience,
     this.education,
     this.linkedinProfile,
+    this.summary,
+    this.profileImage,
   });
 
   // Create from JSON
@@ -27,6 +31,8 @@ class JobSeekerProfileModel {
       experience: json['experience'],
       education: json['education'],
       linkedinProfile: json['linkedin_profile'],
+      summary: json['summary'],
+      profileImage: json['profile_image'],
     );
   }
 
@@ -63,4 +69,5 @@ class JobSeekerProfileModel {
       linkedinProfile: linkedinProfile ?? this.linkedinProfile,
     );
   }
+
 }

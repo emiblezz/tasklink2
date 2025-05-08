@@ -355,6 +355,32 @@ class _JobSearchCard extends StatelessWidget {
     required this.onTap,
   });
 
+  // Helper to format salary with currency
+  String _formatSalary(dynamic salary) {
+    if (salary == null) {
+      return 'Salary not specified';
+    }
+
+    String salaryText = salary.toString();
+
+    // Check if salary already includes a currency code
+    for (String currency in ['UGX', 'USD', 'EUR', 'GBP']) {
+      if (salaryText.startsWith('$currency ')) {
+        // Already formatted with currency
+        return salaryText;
+      }
+    }
+
+    // Default formatting for numeric values (use local currency)
+    try {
+      double amount = double.parse(salaryText);
+      return NumberFormat.currency(symbol: 'UGX ').format(amount);
+    } catch (e) {
+      // If not parsable as number, just return the text
+      return salaryText;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -369,6 +395,45 @@ class _JobSearchCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Company logo if available
+                  if (job.companyLogo != null && job.companyLogo!.isNotEmpty)
+                    Container(
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.only(right: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.network(
+                          job.companyLogo!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => const Icon(
+                            Icons.business,
+                            size: 24,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.only(right: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(
+                        Icons.business,
+                        size: 24,
+                        color: Colors.grey,
+                      ),
+                    ),
+
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -384,12 +449,9 @@ class _JobSearchCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          job.jobType,
+                          job.companyName,
                           style: TextStyle(
-                            color: Theme
-                                .of(context)
-                                .colorScheme
-                                .primary,
+                            color: Colors.grey.shade700,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -408,6 +470,94 @@ class _JobSearchCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
+
+              // Job type and salary
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      job.jobType,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (job.salary != null)
+                    Row(
+                      children: [
+                        Icon(Icons.currency_exchange, size: 14, color: Colors.green.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatSalary(job.salary),
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Skills section (if available)
+              if (job.skills != null && job.skills!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: job.skills!.take(3).map((skill) => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      skill,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  )).toList(),
+                ),
+                if (job.skills!.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '+${job.skills!.length - 3} more skills',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+              ],
+
+              // Location
+              Row(
+                children: [
+                  Icon(Icons.location_on, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    job.location,
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Description preview
               Text(
                 job.description,
                 maxLines: 2,
@@ -415,30 +565,37 @@ class _JobSearchCard extends StatelessWidget {
                 style: TextStyle(color: Colors.grey[600]),
               ),
               const SizedBox(height: 8),
+
+              // Date information
               Row(
                 children: [
                   Icon(
                     Icons.calendar_today,
-                    size: 16,
+                    size: 14,
                     color: Colors.grey[600],
                   ),
                   const SizedBox(width: 4),
                   Text(
                     'Posted: ${job.datePosted != null ? DateFormat(
                         'MMM dd, yyyy').format(job.datePosted!) : 'N/A'}',
-                    style: TextStyle(color: Colors.grey[600]),
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                   const SizedBox(width: 16),
                   Icon(
                     Icons.event,
-                    size: 16,
+                    size: 14,
                     color: Colors.grey[600],
                   ),
                   const SizedBox(width: 4),
                   Text(
                     'Deadline: ${DateFormat('MMM dd, yyyy').format(
                         job.deadline)}',
-                    style: TextStyle(color: Colors.grey[600]),
+                    style: TextStyle(
+                      color: DateTime.now().isAfter(job.deadline.subtract(const Duration(days: 3)))
+                          ? Colors.red
+                          : Colors.grey[600],
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),

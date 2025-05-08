@@ -1,101 +1,101 @@
+import 'dart:convert';
 import 'package:intl/intl.dart';
 
 class NotificationModel {
   final int id;
   final String userId;
-  final String type;
   final String message;
-  final DateTime timestamp;
-  final String status; // 'Read' or 'Unread'
+  final String type;
+  final String status;
+  final DateTime? createdAt;
+  final String? iconName;
+  final Map<String, dynamic>? data;
 
   NotificationModel({
     required this.id,
     required this.userId,
-    required this.type,
     required this.message,
-    required this.timestamp,
+    required this.type,
     required this.status,
+    this.createdAt,
+    this.iconName,
+    this.data,
   });
 
-  // Create a copy with modified fields
-  NotificationModel copyWith({
-    int? id,
-    String? userId,
-    String? type,
-    String? message,
-    DateTime? timestamp,
-    String? status,
-  }) {
-    return NotificationModel(
-      id: id ?? this.id,
-      userId: userId ?? this.userId,
-      type: type ?? this.type,
-      message: message ?? this.message,
-      timestamp: timestamp ?? this.timestamp,
-      status: status ?? this.status,
-    );
-  }
-
-  // Factory constructor to create NotificationModel from JSON
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
     return NotificationModel(
       id: json['notification_id'],
       userId: json['user_id'],
-      type: json['notification_type'],
-      message: json['notification_message'],
-      timestamp: DateTime.parse(json['timestamp']),
-      status: json['status'],
+      message: json['notification_message'] ?? json['message'] ?? '',
+      type: json['notification_type'] ?? json['type'] ?? '',
+      status: json['status'] ?? 'Unread',
+      createdAt: json['timestamp'] != null
+          ? DateTime.parse(json['timestamp'])
+          : (json['created_at'] != null ? DateTime.parse(json['created_at']) : null),
+      iconName: json['icon_name'],
+      data: json['data'] != null
+          ? (json['data'] is String
+          ? jsonDecode(json['data'])
+          : json['data'])
+          : null,
     );
   }
 
-  // Convert NotificationModel to JSON
   Map<String, dynamic> toJson() {
     return {
       'notification_id': id,
       'user_id': userId,
-      'notification_type': type,
       'notification_message': message,
-      'timestamp': timestamp.toIso8601String(),
+      'notification_type': type,
       'status': status,
+      'timestamp': createdAt?.toIso8601String(),
+      'icon_name': iconName,
+      'data': data != null ? jsonEncode(data) : null,
     };
   }
 
-  // Get icon based on notification type
-  String get iconName {
-    switch (type) {
-      case 'application':
-        return 'description';
-      case 'status_update':
-        return 'update';
-      case 'job_match':
-        return 'work';
-      case 'message':
-        return 'mail';
-      default:
-        return 'notifications';
-    }
+  // Add the copyWith method
+  NotificationModel copyWith({
+    int? id,
+    String? userId,
+    String? message,
+    String? type,
+    String? status,
+    DateTime? createdAt,
+    String? iconName,
+    Map<String, dynamic>? data,
+  }) {
+    return NotificationModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      message: message ?? this.message,
+      type: type ?? this.type,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      iconName: iconName ?? this.iconName,
+      data: data ?? this.data,
+    );
   }
 
-  // Format the timestamp for display
+  // Add this getter for the formatted time
   String get formattedTime {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
+    if (createdAt == null) return '';
 
-    if (difference.inDays > 7) {
-      // More than a week ago - show date
-      return DateFormat('MMM d, yyyy').format(timestamp);
-    } else if (difference.inDays > 0) {
-      // Days ago
-      return '${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
-    } else if (difference.inHours > 0) {
-      // Hours ago
-      return '${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
-    } else if (difference.inMinutes > 0) {
-      // Minutes ago
-      return '${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+    final now = DateTime.now();
+    final difference = now.difference(createdAt!);
+
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes} min ago';
+    } else if (difference.inDays < 1) {
+      return '${difference.inHours} hr ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days ago';
     } else {
-      // Just now
-      return 'just now';
+      // Make sure to import 'package:intl/intl.dart' at the top
+      final DateFormat formatter = DateFormat('MMM dd, yyyy');
+      return formatter.format(createdAt!);
     }
   }
 }

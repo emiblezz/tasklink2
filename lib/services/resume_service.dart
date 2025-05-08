@@ -85,6 +85,31 @@ class ResumeService {
       };
     }
   }
+  // Add this method to your ResumeService class
+
+  /// Get a user's resume by their ID
+  Future<Map<String, dynamic>?> getUserResume(String userId) async {
+    try {
+      // Access the supabase client however it's defined in your ResumeService class
+      final response = await _supabaseClient
+          .from('resumes')
+          .select('file_url, text, created_at, resume_id')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (response == null) {
+        debugPrint('No resume found for user $userId');
+        return null;
+      }
+
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching resume for user $userId: $e');
+      return null;
+    }
+  }
 
   // Extract text from file - Fixed to accept a single Uint8List
   Future<String> _extractTextFromFile(Uint8List fileBytes, String fileExtension) async {

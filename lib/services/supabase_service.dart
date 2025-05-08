@@ -96,45 +96,32 @@ class SupabaseService {
   // Get user by ID
   Future<UserModel?> getUserById(String userId) async {
     try {
-      // First, let's print the userId we're searching for
-      print('Searching for user with ID: $userId');
+      // First, try the 'users' table
+      final response = await _supabaseClient
+          .from('users')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
 
-      // Try with user_id column first
-      try {
-        final response = await _supabaseClient
-            .from('users')
-            .select()
-            .eq('user_id', userId)
-            .maybeSingle(); // Use maybeSingle instead of single
-
-        if (response != null) {
-          print('Found user using user_id column');
-          return UserModel.fromJson(response);
-        }
-      } catch (innerError) {
-        print('Error with user_id query: $innerError');
+      if (response != null) {
+        return UserModel.fromJson(response);
       }
 
-      // If not found with user_id, try with id
-      try {
-        final response = await _supabaseClient
-            .from('users')
-            .select()
-            .eq('user_id', userId)
-            .maybeSingle(); // Use maybeSingle instead of single
+      // If not found, try the 'profiles' table
+      final profileResponse = await _supabaseClient
+          .from('profiles')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
 
-        if (response != null) {
-          print('Found user using id column');
-          return UserModel.fromJson(response);
-        }
-      } catch (innerError) {
-        print('Error with id query: $innerError');
+      if (profileResponse != null) {
+        return UserModel.fromJson(profileResponse);
       }
 
-      print('No user found with either column name for ID: $userId');
+      debugPrint('No user found with ID: $userId in any table');
       return null;
     } catch (e) {
-      print('Error getting user by ID: $e');
+      debugPrint('Error getting user by ID: $e');
       return null;
     }
   }
@@ -213,6 +200,57 @@ class SupabaseService {
       return false;
     }
   }
+  Future<Map<String, dynamic>?> getUserResume(String userId) async {
+    try {
+      // First try to get the resume from the resumes table
+      final response = await _supabaseClient
+          .from('resumes')
+          .select('file_url, text, created_at, resume_id')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (response != null) {
+        return response;
+      }
+
+      // If not found, try to get CV URL from jobseeker_profiles
+      final profileResponse = await _supabaseClient
+          .from('jobseeker_profiles')
+          .select('cv')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (profileResponse != null && profileResponse['cv'] != null) {
+        // Create a resume-like structure
+        return {
+          'file_url': profileResponse['cv'],
+          'created_at': DateTime.now().toIso8601String(),
+        };
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching resume: $e');
+      return null;
+    }
+  }
+  Future<Map<String, dynamic>?> getJobseekerProfile(String userId) async {
+    try {
+      final response = await supabaseClient
+          .from('jobseeker_profiles')
+          .select('*, education(*), experience(*)')
+          .eq('user_id', userId)
+          .single();
+
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching jobseeker profile: $e');
+      return null;
+    }
+  }
+  // Add this method to your SupabaseService class
 
   // Add this method to your SupabaseService class
   Future<List<Map<String, dynamic>>> getJobApplicationsWithProfiles(int jobId) async {
@@ -240,6 +278,158 @@ class SupabaseService {
     } catch (e) {
       print('Error getting applications: $e');
       return [];
+    }
+  }
+  Future<Map<String, dynamic>?> getJobseekerProfileData(String userId) async {
+    try {
+      final response = await _supabaseClient
+          .from('jobseeker_profiles')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching jobseeker profile data: $e');
+      return null;
+    }
+  }
+  // Add this method to your SupabaseService class to handle saving feedback
+
+  Future<bool> saveRecruiterFeedback(int applicationId, String feedback) async {
+    try {
+      debugPrint('Saving feedback for application ID: $applicationId');
+
+      // First get the application details for notification
+      final appDetails = await _supabaseClient
+          .from('applications')
+          .select('applicant_id, job_id')
+          .eq('application_id', applicationId)
+          .maybeSingle();
+
+      if (appDetails == null) {
+        debugPrint('Application not found with ID: $applicationId');
+        return false;
+      }
+
+      // Update the application with the feedback
+      await _supabaseClient
+          .from('applications')
+          .update({
+        'recruiter_feedback': feedback,
+        'last_updated': DateTime.now().toIso8601String(),
+      })
+          .eq('application_id', applicationId);
+
+      // Create notification for the applicant about the feedback
+      if (appDetails['applicant_id'] != null) {
+        // Get job details for the notification
+        final jobDetails = await _supabaseClient
+            .from('jobs')
+            .select('job_title')
+            .eq('job_id', appDetails['job_id'])
+            .maybeSingle();
+
+        String jobTitle = 'a job';
+        if (jobDetails != null && jobDetails['job_title'] != null) {
+          jobTitle = jobDetails['job_title'];
+        }
+
+        try {
+          // Create notification
+          await _supabaseClient
+              .from('notifications')
+              .insert({
+            'user_id': appDetails['applicant_id'],
+            'notification_type': 'recruiter_feedback',
+            'notification_message': 'You\'ve received feedback on your application for "$jobTitle"',
+            'status': 'Unread',
+            'timestamp': DateTime.now().toIso8601String(),
+            'data': '{"job_id":"${appDetails['job_id']}","application_id":"$applicationId"}'
+          });
+
+          debugPrint('Feedback notification created for applicant');
+        } catch (notificationError) {
+          debugPrint('Error creating feedback notification: $notificationError');
+          // Continue even if notification creation fails
+        }
+      }
+
+      debugPrint('Feedback saved successfully');
+      return true;
+    } catch (e) {
+      debugPrint('Error saving feedback: $e');
+      return false;
+    }
+  }
+  // Add this method to your SupabaseService class to handle application status updates
+
+  // Add this method to your SupabaseService class to handle application status updates
+
+  Future<bool> updateApplicationStatus(int applicationId, String status) async {
+    try {
+      debugPrint('Updating application $applicationId status to: $status');
+
+      // First get the application details for notification
+      final appDetails = await _supabaseClient
+          .from('applications')
+          .select('applicant_id, job_id')
+          .eq('application_id', applicationId)
+          .maybeSingle();
+
+      if (appDetails == null) {
+        debugPrint('Application not found with ID: $applicationId');
+        return false;
+      }
+
+      // Update the application status
+      await _supabaseClient
+          .from('applications')
+          .update({
+        'application_status': status,
+        'status_updated_at': DateTime.now().toIso8601String(),
+      })
+          .eq('application_id', applicationId);
+
+      // Create notification for the applicant
+      if (appDetails['applicant_id'] != null) {
+        // Get job details for the notification
+        final jobDetails = await _supabaseClient
+            .from('jobs')
+            .select('job_title')
+            .eq('job_id', appDetails['job_id'])
+            .maybeSingle();
+
+        String jobTitle = 'a job';
+        if (jobDetails != null && jobDetails['job_title'] != null) {
+          jobTitle = jobDetails['job_title'];
+        }
+
+        try {
+          // Create notification
+          await _supabaseClient
+              .from('notifications')
+              .insert({
+            'user_id': appDetails['applicant_id'],
+            'notification_type': 'application_update',
+            'notification_message': 'Your application for "$jobTitle" has been updated to $status.',
+            'status': 'Unread',
+            'timestamp': DateTime.now().toIso8601String(),
+            'data': '{"job_id":"${appDetails['job_id']}","status":"$status","application_id":"$applicationId"}'
+          });
+
+          debugPrint('Notification created for applicant');
+        } catch (notificationError) {
+          debugPrint('Error creating notification: $notificationError');
+          // Continue even if notification creation fails
+        }
+      }
+
+      debugPrint('Application status updated successfully');
+      return true;
+    } catch (e) {
+      debugPrint('Error updating application status: $e');
+      return false;
     }
   }
 

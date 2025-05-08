@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tasklink2/models/application_model.dart';
 import 'package:tasklink2/models/job_model.dart';
 import 'package:tasklink2/models/user_model.dart';
+import 'package:tasklink2/models/jobseeker_profile_model.dart';
 import 'package:tasklink2/screens/auth/login_screen.dart';
 import 'package:tasklink2/screens/job_detail_screen.dart';
 import 'package:tasklink2/screens/recruiter/create_job_screen.dart';
@@ -13,12 +14,15 @@ import 'package:tasklink2/screens/recruiter/recruiter_jobs_screen.dart';
 import 'package:tasklink2/services/auth_service.dart';
 import 'package:tasklink2/services/job_service.dart';
 import 'package:tasklink2/services/supabase_service.dart';
+import 'package:tasklink2/services/resume_service.dart';
+import 'package:tasklink2/config/app_config.dart';
+import 'package:tasklink2/services/ai_services.dart';
 import 'package:tasklink2/widgets/job_card.dart';
-
-import '../../widgets/notification_badge.dart';
+import 'package:tasklink2/widgets/notification_badge.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../help_desk_screen.dart';
 import '../settings_screen.dart';
-
 
 class RecruiterHomeScreen extends StatefulWidget {
   const RecruiterHomeScreen({super.key});
@@ -29,7 +33,7 @@ class RecruiterHomeScreen extends StatefulWidget {
 
 class _RecruiterHomeScreenState extends State<RecruiterHomeScreen> {
   int _selectedIndex = 0;
-
+  final SupabaseService _supabaseService = SupabaseService();
   @override
   void initState() {
     super.initState();
@@ -960,11 +964,12 @@ class _CandidatesTabState extends State<_CandidatesTab> {
                           cachedUser,
                         );
                       }
-
+                      final supabaseService = SupabaseService();
                       // Otherwise use the original implementation with FutureBuilder
-                      return _ApplicationCard(
+                      return ApplicationCard(
                         application: application,
                         onUpdateStatus: _updateApplicationStatus,
+                        supabaseService: supabaseService,
                       );
                     },
                   ),
@@ -1127,25 +1132,48 @@ class _CandidatesTabState extends State<_CandidatesTab> {
   }
 }
 // Application card
-class _ApplicationCard extends StatelessWidget {
+// In _ApplicationCard widget inside _CandidatesTabState class
+class ApplicationCard extends StatefulWidget {
   final ApplicationModel application;
   final Function(int, String) onUpdateStatus;
+  final VoidCallback? onViewDetails;
+  final VoidCallback? onViewCV;
+  final SupabaseService supabaseService; // Added parameter
 
-  const _ApplicationCard({
+  const ApplicationCard({
+    Key? key,
     required this.application,
     required this.onUpdateStatus,
-  });
+    this.onViewDetails,
+    this.onViewCV,
+    required this.supabaseService, // Added as required
+  }) : super(key: key);
+
+  @override
+  ApplicationCardState createState() => ApplicationCardState();
+}
+
+class ApplicationCardState extends State<ApplicationCard> {
+  final TextEditingController _feedbackController = TextEditingController();
+  bool _isSendingFeedback = false;
+  bool _isUpdatingStatus = false;
+
+  @override
+  void dispose() {
+    _feedbackController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final supabaseService = SupabaseService();
+    // Access supabaseService through widget.supabaseService
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: FutureBuilder<UserModel?>(
-          future: supabaseService.getUserById(application.applicantId),
+          future: widget.supabaseService.getUserById(widget.application.applicantId),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const ListTile(
@@ -1156,9 +1184,9 @@ class _ApplicationCard extends StatelessWidget {
 
             // Create a fallback user if data isn't available
             final applicant = snapshot.data ?? UserModel(
-              id: application.applicantId,
-              name: 'Applicant (ID: ${application.applicantId.substring(0, 6)}...)',
-              email: 'Email not available',
+              id: widget.application.applicantId,
+              name: 'Applicant (Loading details...)',
+              email: 'Loading contact information...',
               phone: '',
               roleId: 1, // Assume job seeker
               profileStatus: 'Active',
@@ -1168,16 +1196,26 @@ class _ApplicationCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Avatar with applicant initial
                     CircleAvatar(
+                      radius: 30,
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       child: Text(
                         applicant.name.isNotEmpty
                             ? applicant.name.substring(0, 1).toUpperCase()
                             : '?',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 16),
+
+                    // Applicant details
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1186,57 +1224,219 @@ class _ApplicationCard extends StatelessWidget {
                             applicant.name,
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                              fontSize: 18,
                             ),
                           ),
-                          Text(applicant.email),
+                          const SizedBox(height: 4),
+                          if (applicant.email.isNotEmpty)
+                            Row(
+                              children: [
+                                const Icon(Icons.email, size: 16, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    applicant.email,
+                                    style: const TextStyle(color: Colors.grey),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
                           if (applicant.phone.isNotEmpty)
-                            Text(applicant.phone),
+                            Row(
+                              children: [
+                                const Icon(Icons.phone, size: 16, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Text(
+                                  applicant.phone,
+                                  style: const TextStyle(color: Colors.grey),
+                                ),
+                              ],
+                            ),
+
+                          // Skills display from JobSeekerProfileModel
+                          FutureBuilder<JobSeekerProfileModel?>(
+                            future: widget.supabaseService.getJobSeekerProfile(applicant.id),
+                            builder: (context, profileSnapshot) {
+                              if (profileSnapshot.connectionState == ConnectionState.waiting ||
+                                  !profileSnapshot.hasData ||
+                                  profileSnapshot.data?.skills == null ||
+                                  profileSnapshot.data!.skills!.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+
+                              // Parse skills from the string
+                              final List<String> skillsList = profileSnapshot.data!.skills!
+                                  .split(',')
+                                  .map((s) => s.trim())
+                                  .where((s) => s.isNotEmpty)
+                                  .toList();
+
+                              if (skillsList.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 4,
+                                    runSpacing: 4,
+                                    children: skillsList
+                                        .take(3)
+                                        .map((skill) => Chip(
+                                      label: Text(skill),
+                                      labelStyle: const TextStyle(fontSize: 11),
+                                      padding: EdgeInsets.zero,
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      backgroundColor: Colors.blueGrey.shade50,
+                                    ))
+                                        .toList(),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                         ],
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today,
-                      size: 16,
-                      color: Colors.grey[600],
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Applied: ${application.dateApplied != null ? DateFormat('MMM dd, yyyy').format(application.dateApplied!) : 'Unknown'}',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Text('Status: '),
-                    const SizedBox(width: 8),
-                    Chip(
-                      label: Text(application.applicationStatus),
-                      backgroundColor: _getStatusColor(application.applicationStatus).withOpacity(0.1),
-                      labelStyle: TextStyle(
-                        color: _getStatusColor(application.applicationStatus),
+
+                    // Application status chip
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(widget.application.applicationStatus).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        widget.application.applicationStatus,
+                        style: TextStyle(
+                          color: _getStatusColor(widget.application.applicationStatus),
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
                 ),
+
+                const SizedBox(height: 12),
+
+                // Application date and match score if available
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Applied: ${widget.application.dateApplied != null ? DateFormat('MMM dd, yyyy').format(widget.application.dateApplied!) : 'Unknown'}',
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
+                    const Spacer(),
+                    if (widget.application.matchScore != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getMatchScoreColor(widget.application.matchScore!),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Match: ${(widget.application.matchScore! * 100).toInt()}%',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // Show feedback if available
+                if (widget.application.recruiterFeedback != null && widget.application.recruiterFeedback!.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade100),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.comment, size: 16, color: Colors.amber.shade800),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Your Feedback:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: Colors.amber.shade900,
+                              ),
+                            ),
+                            const Spacer(),
+                            InkWell(
+                              onTap: () => _showFeedbackDialog(context, widget.application.id!),
+                              child: Icon(
+                                Icons.edit,
+                                size: 16,
+                                color: Colors.amber.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.application.recruiterFeedback!,
+                          style: TextStyle(
+                            color: Colors.grey.shade800,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                // No feedback yet, show add feedback button
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.comment_outlined, size: 16),
+                      label: const Text('Add Feedback'),
+                      onPressed: () => _showFeedbackDialog(context, widget.application.id!),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        foregroundColor: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+
                 const SizedBox(height: 16),
+
+                // Action buttons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // View CV button (would link to actual CV)
+                    // View CV button
                     OutlinedButton.icon(
                       icon: const Icon(Icons.description, size: 16),
                       label: const Text('View CV'),
-                      onPressed: () {
-                        // Open CV viewer
-                      },
+                      onPressed: () => _viewApplicantResume(context, widget.application.applicantId),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // View Profile button
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.person, size: 16),
+                      label: const Text('View Profile'),
+                      onPressed: () => _viewApplicantDetails(context, applicant),
                     ),
                     const SizedBox(width: 8),
 
@@ -1256,8 +1456,40 @@ class _ApplicationCard extends StatelessWidget {
                           child: Text('Mark as Rejected'),
                         ),
                       ],
-                      onSelected: (status) {
-                        onUpdateStatus(application.id!, status);
+                      onSelected: (status) async {
+                        setState(() {
+                          _isUpdatingStatus = true;
+                        });
+
+                        // Update status using widget.supabaseService
+                        final success = await widget.supabaseService.updateApplicationStatus(
+                          widget.application.id!,
+                          status,
+                        );
+
+                        setState(() {
+                          _isUpdatingStatus = false;
+                        });
+
+                        // Show result
+                        if (success) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Application status updated to $status'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+
+                          // Call the callback to update the UI
+                          widget.onUpdateStatus(widget.application.id!, status);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Failed to update status. Please try again.'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -1270,13 +1502,22 @@ class _ApplicationCard extends StatelessWidget {
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Text(
+                          children: [
+                            _isUpdatingStatus
+                                ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                                : Text(
                               'Update Status',
                               style: TextStyle(color: Colors.white),
                             ),
-                            SizedBox(width: 4),
-                            Icon(
+                            const SizedBox(width: 4),
+                            const Icon(
                               Icons.arrow_drop_down,
                               color: Colors.white,
                               size: 16,
@@ -1295,6 +1536,393 @@ class _ApplicationCard extends StatelessWidget {
     );
   }
 
+  void _showFeedbackDialog(BuildContext context, int applicationId) {
+    // Initialize controller with existing feedback if available
+    _feedbackController.text = widget.application.recruiterFeedback ?? '';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Applicant Feedback'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter feedback for the applicant. They will be notified when you submit feedback.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _feedbackController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'Enter your feedback here...',
+              ),
+              minLines: 3,
+              maxLines: 6,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              // Get feedback text
+              final feedback = _feedbackController.text.trim();
+
+              // Hide dialog
+              Navigator.pop(context);
+
+              if (feedback.isNotEmpty) {
+                setState(() {
+                  _isSendingFeedback = true;
+                });
+
+                // Save feedback using widget.supabaseService
+                final success = await widget.supabaseService.saveRecruiterFeedback(
+                  applicationId,
+                  feedback,
+                );
+
+                setState(() {
+                  _isSendingFeedback = false;
+                });
+
+                // Show success or error message
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Feedback saved successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+
+                  // Update the application in the local state
+                  widget.onUpdateStatus(applicationId, widget.application.applicationStatus);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Failed to save feedback. Please try again.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Submit Feedback'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Method to view applicant resume
+  void _viewApplicantResume(BuildContext context, String applicantId) async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Get resume URL using widget.supabaseService
+      final resumeData = await widget.supabaseService.getUserResume(applicantId);
+
+      // Close loading indicator
+      Navigator.pop(context);
+
+      if (resumeData == null || resumeData['file_url'] == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No resume found for this applicant'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Show dialog with options to view or download
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Resume Options'),
+          content: const Text('Would you like to view or download this resume?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _launchURL(context, resumeData['file_url']);
+              },
+              child: const Text('View'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Share.share(resumeData['file_url'], subject: 'Resume file');
+              },
+              child: const Text('Download'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Close loading indicator if it's still showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing resume: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Method to view applicant details
+  void _viewApplicantDetails(BuildContext context, UserModel user) async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Get jobseeker profile using widget.supabaseService
+      final profile = await widget.supabaseService.getJobSeekerProfile(user.id);
+
+      // Close loading indicator
+      Navigator.pop(context);
+
+      if (profile == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No profile data available for this applicant'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Parse skills
+      List<String> skillsList = [];
+      if (profile.skills != null && profile.skills!.isNotEmpty) {
+        skillsList = profile.skills!.split(',').map((s) => s.trim()).toList();
+      }
+
+      // Show profile dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Applicant Details'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Avatar and basic info
+                Center(
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 40,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        child: Text(
+                          user.name.isNotEmpty
+                              ? user.name.substring(0, 1).toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        user.name,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 24),
+
+                // Contact information
+                const Text(
+                  'Contact Information',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.email, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(user.email),
+                    ),
+                  ],
+                ),
+                if (user.phone.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.phone, size: 16),
+                      const SizedBox(width: 8),
+                      Text(user.phone),
+                    ],
+                  ),
+                ],
+
+                // LinkedIn profile if available
+                if (profile.linkedinProfile != null && profile.linkedinProfile!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.link, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => _launchURL(context, profile.linkedinProfile!),
+                          child: Text(
+                            profile.linkedinProfile!,
+                            style: TextStyle(
+                              color: Colors.blue.shade700,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // Skills
+                if (skillsList.isNotEmpty) ...[
+                  const Text(
+                    'Skills',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: skillsList.map((skill) => Chip(
+                      label: Text(skill),
+                      backgroundColor: Colors.blue.shade50,
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // Education
+                if (profile.education != null && profile.education!.isNotEmpty) ...[
+                  const Text(
+                    'Education',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(profile.education!),
+                  const SizedBox(height: 16),
+                ],
+
+                // Experience
+                if (profile.experience != null && profile.experience!.isNotEmpty) ...[
+                  const Text(
+                    'Experience',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(profile.experience!),
+                  const SizedBox(height: 16),
+                ],
+
+                // Summary
+                if (profile.summary != null && profile.summary!.isNotEmpty) ...[
+                  const Text(
+                    'Summary',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(profile.summary!),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog if it's still showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading profile: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Helper to launch URL
+  Future<void> _launchURL(BuildContext context, String url) async {
+    final Uri uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open URL: $url'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Helper methods
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Pending':
@@ -1306,6 +1934,13 @@ class _ApplicationCard extends StatelessWidget {
       default:
         return Colors.grey;
     }
+  }
+
+  Color _getMatchScoreColor(double score) {
+    if (score >= 0.8) return Colors.green;
+    if (score >= 0.6) return Colors.blue;
+    if (score >= 0.4) return Colors.orange;
+    return Colors.red;
   }
 }
 

@@ -1,9 +1,12 @@
+// In application_model.dart
 class ApplicationModel {
   final int? id;
   final int jobId;
   final String applicantId;
   final String applicationStatus;
   final DateTime? dateApplied;
+  final String? recruiterFeedback;
+  final double? matchScore;
 
   ApplicationModel({
     this.id,
@@ -11,15 +14,34 @@ class ApplicationModel {
     required this.applicantId,
     required this.applicationStatus,
     this.dateApplied,
+    this.recruiterFeedback,
+    this.matchScore,
   });
 
-  // Ensure this method correctly updates the status
+  factory ApplicationModel.fromJson(Map<String, dynamic> json) {
+    return ApplicationModel(
+      id: json['application_id'],
+      jobId: json['job_id'],
+      applicantId: json['applicant_id'],
+      applicationStatus: json['application_status'] ?? 'Pending',
+      dateApplied: json['date_applied'] != null
+          ? DateTime.parse(json['date_applied'])
+          : null,
+      recruiterFeedback: json['recruiter_feedback'],
+      matchScore: json['match_score'] != null
+          ? double.parse(json['match_score'].toString())
+          : null,
+    );
+  }
+
   ApplicationModel copyWith({
     int? id,
     int? jobId,
     String? applicantId,
     String? applicationStatus,
     DateTime? dateApplied,
+    String? recruiterFeedback,
+    double? matchScore,
   }) {
     return ApplicationModel(
       id: id ?? this.id,
@@ -27,29 +49,8 @@ class ApplicationModel {
       applicantId: applicantId ?? this.applicantId,
       applicationStatus: applicationStatus ?? this.applicationStatus,
       dateApplied: dateApplied ?? this.dateApplied,
+      recruiterFeedback: recruiterFeedback ?? this.recruiterFeedback,
+      matchScore: matchScore ?? this.matchScore,
     );
-  }
-
-  // Ensure this correctly maps between database and model
-  factory ApplicationModel.fromJson(Map<String, dynamic> json) {
-    return ApplicationModel(
-      id: json['application_id'] ?? json['id'],
-      jobId: json['job_id'],
-      applicantId: json['applicant_id'],
-      applicationStatus: json['application_status'] ?? 'Pending',
-      dateApplied: json['date_applied'] != null
-          ? DateTime.parse(json['date_applied'])
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'application_id': id,
-      'job_id': jobId,
-      'applicant_id': applicantId,
-      'application_status': applicationStatus,
-      'date_applied': dateApplied?.toIso8601String(),
-    };
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:tasklink2/models/job_model.dart';
 import 'package:tasklink2/screens/auth/login_screen.dart';
@@ -856,6 +857,32 @@ class _JobCard extends StatelessWidget {
     required this.onTap,
   });
 
+  // Helper to format salary with currency
+  String _formatSalary(dynamic salary) {
+    if (salary == null) {
+      return 'Salary not specified';
+    }
+
+    String salaryText = salary.toString();
+
+    // Check if salary already includes a currency code
+    for (String currency in ['UGX', 'USD', 'EUR', 'GBP']) {
+      if (salaryText.startsWith('$currency ')) {
+        // Already formatted with currency
+        return salaryText;
+      }
+    }
+
+    // Default formatting for numeric values (use local currency)
+    try {
+      double amount = double.parse(salaryText);
+      return NumberFormat.currency(symbol: 'UGX ').format(amount);
+    } catch (e) {
+      // If not parsable as number, just return the text
+      return salaryText;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -878,7 +905,30 @@ class _JobCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              // Job type and deadline row
+              // Company and location row
+              Row(
+                children: [
+                  Icon(Icons.business, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      job.companyName,
+                      style: TextStyle(color: Colors.grey.shade600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.location_on, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    job.location,
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Job type and salary row
               Row(
                 children: [
                   Chip(
@@ -886,10 +936,72 @@ class _JobCard extends StatelessWidget {
                     backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                     labelStyle: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
+                      fontSize: 12,
                     ),
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   const Spacer(),
-                  const Icon(Icons.calendar_today, size: 16),
+                  if (job.salary != null)
+                    Row(
+                      children: [
+                        Icon(Icons.currency_exchange, size: 14, color: Colors.green.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatSalary(job.salary),
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Skills section (limited to 3 for card view)
+              if (job.skills != null && job.skills!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: job.skills!.take(3).map((skill) => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      skill,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  )).toList(),
+                ),
+
+                // Show "more skills" indicator if there are more than 3
+                if (job.skills!.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '+${job.skills!.length - 3} more skills',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+              ],
+
+              // Deadline row
+              Row(
+                children: [
+                  const Icon(Icons.calendar_today, size: 14),
                   const SizedBox(width: 4),
                   Text(
                     'Deadline: ${DateFormat('MMM dd').format(job.deadline)}',
@@ -899,28 +1011,19 @@ class _JobCard extends StatelessWidget {
                           : Colors.grey[600],
                     ),
                   ),
+                  const Spacer(),
+
+                  // Posted date
+                  if (job.datePosted != null)
+                    Text(
+                      'Posted ${_getTimeAgo(job.datePosted!)}',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                    ),
                 ],
               ),
-              const SizedBox(height: 12),
-
-              // Short description
-              Text(
-                job.description.length > 100
-                    ? '${job.description.substring(0, 100)}...'
-                    : job.description,
-                style: TextStyle(color: Colors.grey[700]),
-              ),
-              const SizedBox(height: 12),
-
-              // Posted date
-              if (job.datePosted != null)
-                Text(
-                  'Posted ${_getTimeAgo(job.datePosted!)}',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 12,
-                  ),
-                ),
             ],
           ),
         ),

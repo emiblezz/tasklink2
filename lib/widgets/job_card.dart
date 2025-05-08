@@ -24,7 +24,7 @@ class JobCard extends StatelessWidget {
     }
 
     String salaryText = salary.toString();
-    
+
     // Check if salary already includes a currency code
     for (String currency in ['UGX', 'USD', 'EUR', 'GBP']) {
       if (salaryText.startsWith('$currency ')) {
@@ -32,7 +32,7 @@ class JobCard extends StatelessWidget {
         return salaryText;
       }
     }
-    
+
     // Default formatting for numeric values (use local currency)
     try {
       double amount = double.parse(salaryText);
@@ -85,22 +85,22 @@ class JobCard extends StatelessWidget {
                     ),
                     child: job.companyLogo != null && job.companyLogo!.isNotEmpty
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              job.companyLogo!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => const Icon(
-                                Icons.business,
-                                size: 30,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          )
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        job.companyLogo!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => const Icon(
+                          Icons.business,
+                          size: 30,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    )
                         : const Icon(
-                            Icons.business,
-                            size: 30,
-                            color: Colors.grey,
-                          ),
+                      Icons.business,
+                      size: 30,
+                      color: Colors.grey,
+                    ),
                   ),
                   const SizedBox(width: 12),
 
@@ -158,7 +158,7 @@ class JobCard extends StatelessWidget {
               ],
 
               const SizedBox(height: 12),
-              
+
               // Skills section (if available)
               if (job.skills != null && job.skills!.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -188,7 +188,7 @@ class JobCard extends StatelessWidget {
                     ),
                   )).toList(),
                 ),
-                
+
                 // Show "more skills" indicator if there are more than 3
                 if (job.skills!.length > 3)
                   Padding(

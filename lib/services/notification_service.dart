@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase/supabase.dart';
 import 'package:tasklink2/models/notification_model.dart';
@@ -59,17 +60,26 @@ class NotificationService extends ChangeNotifier {
     required String userId,
     required String notificationType,
     required String message,
+    Map<String, dynamic>? data,
   }) async {
     try {
       debugPrint('Creating notification for user: $userId, type: $notificationType');
 
-      await _supabase.from('notifications').insert({
+      final notification = {
         'user_id': userId,
         'notification_type': notificationType,
         'notification_message': message,
         'timestamp': DateTime.now().toIso8601String(),
         'status': 'Unread',
-      });
+        'icon_name': _getIconForType(notificationType),
+      };
+
+      // Add data if provided
+      if (data != null) {
+        notification['data'] = jsonEncode(data);
+      }
+
+      await _supabase.from('notifications').insert(notification);
 
       debugPrint('Notification created successfully');
 
@@ -80,6 +90,45 @@ class NotificationService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error creating notification: $e');
+    }
+  }
+
+  // Enhanced send notification method with more fields
+  Future<void> sendNotification({
+    required String userId,
+    required String title,
+    required String body,
+    required String type,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      debugPrint('Sending notification to user: $userId, type: $type');
+
+      final notification = {
+        'user_id': userId,
+        'notification_type': type,
+        'notification_message': body,
+        'timestamp': DateTime.now().toIso8601String(),
+        'status': 'Unread',
+        'icon_name': _getIconForType(type),
+      };
+
+      // Add data if provided
+      if (data != null) {
+        notification['data'] = jsonEncode(data);
+      }
+
+      await _supabase.from('notifications').insert(notification);
+
+      debugPrint('Notification sent successfully');
+
+      // If this notification is for the user whose notifications we're currently displaying
+      // then refresh the list
+      if (_notifications.isNotEmpty && _notifications.first.userId == userId) {
+        await fetchNotifications(userId);
+      }
+    } catch (e) {
+      debugPrint('Error sending notification: $e');
     }
   }
 
@@ -153,61 +202,123 @@ class NotificationService extends ChangeNotifier {
     }
   }
 
-  // ADDED MISSING METHODS:
+  // Get unread count for a user
+  Future<int> getUnreadCount(String userId) async {
+    try {
+      final response = await _supabase
+          .from('notifications')
+          .select('notification_id')
+          .eq('user_id', userId)
+          .eq('status', 'Unread');
+
+      if (response != null && response is List) {
+        _unreadCount = response.length;
+        notifyListeners();
+        return _unreadCount;
+      }
+      return 0;
+    } catch (e) {
+      debugPrint('Error getting unread count: $e');
+      return 0;
+    }
+  }
 
   // Notify about job application
   Future<void> notifyJobApplication({
     required String recruiterId,
     required String jobTitle,
-    required String applicantName
+    required String applicantName,
+    int? jobId,
+    String? applicantId,
   }) async {
     debugPrint('Creating job application notification for recruiter: $recruiterId');
+
+    Map<String, dynamic>? data;
+    if (jobId != null && applicantId != null) {
+      data = {
+        'job_id': jobId.toString(),
+        'applicant_id': applicantId,
+      };
+    }
+
     await createNotification(
       userId: recruiterId,
       notificationType: 'application',
       message: '$applicantName has applied for the position: $jobTitle',
+      data: data,
     );
   }
 
   // Notify about application status change
-  // In your NotificationService class
   Future<void> notifyStatusChange({
     required String applicantId,
     required String jobTitle,
     required String status,
+    int? jobId,
+    int? applicationId,
   }) async {
     try {
       debugPrint('Creating status change notification for applicant: $applicantId');
 
-      // Skip profile check and directly create notification
-      // This is a fallback approach since the profile checks are failing
+      Map<String, dynamic>? data;
+      if (jobId != null) {
+        data = {
+          'job_id': jobId.toString(),
+          'status': status,
+        };
 
-      final notification = {
-        'user_id': applicantId,
-        'notification_type': 'status_update',
-        'notification_message': 'Your application for "$jobTitle" has been updated to $status.',
-        'timestamp': DateTime.now().toIso8601String(),
-        'status': 'Unread',
-      };
-
-      try {
-        // Directly attempt to create the notification without profile checks
-        await _supabase
-            .from('notifications')
-            .insert(notification);
-
-        debugPrint('Status update notification created successfully');
-      } catch (insertError) {
-        debugPrint('Error inserting notification: $insertError');
-
-        // Analyze the error to see if it's a permissions issue
-        if (insertError.toString().contains('violates row-level security') ||
-            insertError.toString().contains('Forbidden')) {
-          debugPrint('This appears to be a permissions error - check your RLS policies');
+        if (applicationId != null) {
+          data['application_id'] = applicationId.toString();
         }
       }
+
+      await sendNotification(
+        userId: applicantId,
+        title: 'Application Status Update',
+        body: 'Your application for "$jobTitle" has been updated to $status.',
+        type: 'application_update',
+        data: data,
+      );
+
+      debugPrint('Status update notification created successfully');
     } catch (e) {
-      debugPrint('Error creating notification: $e');
+      debugPrint('Error creating status update notification: $e');
+    }
+  }
+
+  // Notify about recruiter feedback
+  Future<void> notifyRecruiterFeedback({
+    required String applicantId,
+    required String jobTitle,
+    required String feedback,
+    int? jobId,
+    int? applicationId,
+  }) async {
+    try {
+      debugPrint('Creating recruiter feedback notification for applicant: $applicantId');
+
+      Map<String, dynamic>? data;
+      if (jobId != null) {
+        data = {
+          'job_id': jobId.toString(),
+        };
+
+        if (applicationId != null) {
+          data['application_id'] = applicationId.toString();
+        }
+      }
+
+      await sendNotification(
+        userId: applicantId,
+        title: 'Recruiter Feedback',
+        body: 'You\'ve received feedback on your application for "$jobTitle"',
+        type: 'recruiter_feedback',
+        data: data,
+      );
+
+      debugPrint('Recruiter feedback notification created successfully');
+    } catch (e) {
+      debugPrint('Error creating recruiter feedback notification: $e');
     }
   }
 
@@ -216,14 +327,43 @@ class NotificationService extends ChangeNotifier {
     required List<String> jobSeekerIds,
     required String jobTitle,
     required String companyName,
+    int? jobId,
   }) async {
     debugPrint('Creating new job notifications for ${jobSeekerIds.length} job seekers');
+
+    Map<String, dynamic>? data;
+    if (jobId != null) {
+      data = {
+        'job_id': jobId.toString(),
+      };
+    }
+
     for (final userId in jobSeekerIds) {
       await createNotification(
         userId: userId,
         notificationType: 'job_match',
         message: 'New job opportunity: $jobTitle at $companyName',
+        data: data,
       );
+    }
+  }
+
+  // Helper method to determine icon based on notification type
+  String _getIconForType(String type) {
+    switch (type) {
+      case 'application':
+        return 'description';
+      case 'application_update':
+      case 'status_update':
+        return 'update';
+      case 'job_match':
+        return 'work';
+      case 'recruiter_feedback':
+        return 'comment';
+      case 'message':
+        return 'mail';
+      default:
+        return 'notifications';
     }
   }
 
