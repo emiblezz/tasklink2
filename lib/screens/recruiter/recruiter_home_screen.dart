@@ -2358,29 +2358,146 @@ class ApplicationCardState extends State<ApplicationCard> {
         ),
       );
 
+      debugPrint('Viewing applicant details for user ID: ${user.id}');
+
       // Get jobseeker profile using widget.supabaseService
-      final profile = await widget.supabaseService.getJobSeekerProfile(user.id);
+      final profile = await widget.supabaseService.getJobseekerProfileData(user.id);
 
       // Close loading indicator
-      Navigator.pop(context);
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
       if (profile == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No profile data available for this applicant'),
-            backgroundColor: Colors.orange,
+        // Show a simplified profile for users without full profiles
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Applicant Details'),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Avatar and basic info
+                  Center(
+                    child: Column(
+                      children: [
+                        CircleAvatar(
+                          radius: 40,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          child: Text(
+                            user.name.isNotEmpty
+                                ? user.name.substring(0, 1).toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          user.name,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 24),
+
+                  // Contact information
+                  const Text(
+                    'Contact Information',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.email, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(user.email),
+                      ),
+                    ],
+                  ),
+                  if (user.phone.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.phone, size: 16),
+                        const SizedBox(width: 8),
+                        Text(user.phone),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.amber.shade800, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Profile Data Access Issue',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'There was an issue accessing the complete profile data for this applicant. The profile exists in the system but may require additional permissions to view.',
+                          style: TextStyle(
+                            color: Colors.amber.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.description),
+                label: const Text('View Resume'),
+                onPressed: () {
+                  Navigator.pop(context);
+                  _viewApplicantResume(context, user.id);
+                },
+              ),
+            ],
           ),
         );
         return;
       }
 
-      // Parse skills
-      List<String> skillsList = [];
-      if (profile.skills != null && profile.skills!.isNotEmpty) {
-        skillsList = profile.skills!.split(',').map((s) => s.trim()).toList();
-      }
-
-      // Show profile dialog
+      // Show full profile if data is available
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -2451,7 +2568,7 @@ class ApplicationCardState extends State<ApplicationCard> {
                 ],
 
                 // LinkedIn profile if available
-                if (profile.linkedinProfile != null && profile.linkedinProfile!.isNotEmpty) ...[
+                if (profile['linkedin_profile'] != null && profile['linkedin_profile'].toString().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -2459,9 +2576,9 @@ class ApplicationCardState extends State<ApplicationCard> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: InkWell(
-                          onTap: () => _launchURL(context, profile.linkedinProfile!),
+                          onTap: () => _openDocumentUrl(context, profile['linkedin_profile'].toString()),
                           child: Text(
-                            profile.linkedinProfile!,
+                            profile['linkedin_profile'].toString(),
                             style: TextStyle(
                               color: Colors.blue.shade700,
                               decoration: TextDecoration.underline,
@@ -2475,7 +2592,7 @@ class ApplicationCardState extends State<ApplicationCard> {
                 const SizedBox(height: 16),
 
                 // Skills
-                if (skillsList.isNotEmpty) ...[
+                if (profile['skills'] != null && profile['skills'].toString().isNotEmpty) ...[
                   const Text(
                     'Skills',
                     style: TextStyle(
@@ -2487,7 +2604,10 @@ class ApplicationCardState extends State<ApplicationCard> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: skillsList.map((skill) => Chip(
+                    children: profile['skills'].toString().split(',')
+                        .map((s) => s.trim())
+                        .where((s) => s.isNotEmpty)
+                        .map((skill) => Chip(
                       label: Text(skill),
                       backgroundColor: Colors.blue.shade50,
                     )).toList(),
@@ -2496,7 +2616,7 @@ class ApplicationCardState extends State<ApplicationCard> {
                 ],
 
                 // Education
-                if (profile.education != null && profile.education!.isNotEmpty) ...[
+                if (profile['education'] != null && profile['education'].toString().isNotEmpty) ...[
                   const Text(
                     'Education',
                     style: TextStyle(
@@ -2505,12 +2625,12 @@ class ApplicationCardState extends State<ApplicationCard> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(profile.education!),
+                  Text(profile['education'].toString()),
                   const SizedBox(height: 16),
                 ],
 
                 // Experience
-                if (profile.experience != null && profile.experience!.isNotEmpty) ...[
+                if (profile['experience'] != null && profile['experience'].toString().isNotEmpty) ...[
                   const Text(
                     'Experience',
                     style: TextStyle(
@@ -2519,21 +2639,8 @@ class ApplicationCardState extends State<ApplicationCard> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(profile.experience!),
+                  Text(profile['experience'].toString()),
                   const SizedBox(height: 16),
-                ],
-
-                // Summary
-                if (profile.summary != null && profile.summary!.isNotEmpty) ...[
-                  const Text(
-                    'Summary',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(profile.summary!),
                 ],
               ],
             ),
@@ -2543,6 +2650,16 @@ class ApplicationCardState extends State<ApplicationCard> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
             ),
+            // Option to view resume if available
+            if (profile['cv'] != null && profile['cv'].toString().isNotEmpty)
+              TextButton.icon(
+                icon: const Icon(Icons.description),
+                label: const Text('View Resume'),
+                onPressed: () {
+                  Navigator.pop(context);
+                  _viewApplicantResume(context, user.id);
+                },
+              ),
           ],
         ),
       );
@@ -2552,7 +2669,8 @@ class ApplicationCardState extends State<ApplicationCard> {
         Navigator.pop(context);
       }
 
-      // Show error message
+      // Show error message with more details
+      debugPrint('❌ Error in _viewApplicantDetails: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error loading profile: $e'),
