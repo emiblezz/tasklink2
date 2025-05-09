@@ -466,42 +466,38 @@ class SupabaseService {
     try {
       debugPrint('Updating application $applicationId status to: $status');
 
-      // First get the application details for notification
-      final appDetails = await _supabaseClient
-          .from('applications')
-          .select('applicant_id, job_id')
-          .eq('application_id', applicationId)
-          .maybeSingle();
+      // Call the bypass function to avoid trigger issues
+      await _supabaseClient.rpc(
+          'bypass_update_application_status',
+          params: {
+            'application_id_param': applicationId,
+            'status_param': status
+          }
+      );
 
-      if (appDetails == null) {
-        debugPrint('Application not found with ID: $applicationId');
-        return false;
-      }
+      debugPrint('Bypass update succeeded');
 
-      // Update the application status
-      await _supabaseClient
-          .from('applications')
-          .update({
-        'application_status': status,
-        'status_updated_at': DateTime.now().toIso8601String(),
-      })
-          .eq('application_id', applicationId);
-
-      // Create notification for the applicant
-      if (appDetails['applicant_id'] != null) {
-        // Get job details for the notification
-        final jobDetails = await _supabaseClient
-            .from('jobs')
-            .select('job_title')
-            .eq('job_id', appDetails['job_id'])
+      // Handle notifications as before
+      try {
+        final appDetails = await _supabaseClient
+            .from('applications')
+            .select('applicant_id, job_id')
+            .eq('application_id', applicationId)
             .maybeSingle();
 
-        String jobTitle = 'a job';
-        if (jobDetails != null && jobDetails['job_title'] != null) {
-          jobTitle = jobDetails['job_title'];
-        }
+        if (appDetails != null && appDetails['applicant_id'] != null) {
+          // Get job details
+          final jobDetails = await _supabaseClient
+              .from('job_postings')
+              .select('job_title')
+              .eq('job_id', appDetails['job_id'])
+              .maybeSingle();
 
-        try {
+          String jobTitle = 'a job';
+          if (jobDetails != null && jobDetails['job_title'] != null) {
+            jobTitle = jobDetails['job_title'];
+          }
+
           // Create notification
           await _supabaseClient
               .from('notifications')
@@ -515,13 +511,12 @@ class SupabaseService {
           });
 
           debugPrint('Notification created for applicant');
-        } catch (notificationError) {
-          debugPrint('Error creating notification: $notificationError');
-          // Continue even if notification creation fails
         }
+      } catch (notificationError) {
+        debugPrint('Error creating notification: $notificationError');
+        // Continue even if notification creation fails
       }
 
-      debugPrint('Application status updated successfully');
       return true;
     } catch (e) {
       debugPrint('Error updating application status: $e');
