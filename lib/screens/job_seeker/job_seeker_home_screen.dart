@@ -622,6 +622,49 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
                             ),
                           ],
                         ),
+
+                        // Add recruiter feedback section if available
+                        if (application.recruiterFeedback != null &&
+                            application.recruiterFeedback!.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          const Divider(),
+                          const SizedBox(height: 8),
+
+                          // Feedback header
+                          Row(
+                            children: [
+                              const Icon(Icons.feedback_outlined,
+                                  size: 16,
+                                  color: Colors.blue),
+                              const SizedBox(width: 4),
+                              const Text(
+                                'Recruiter Feedback',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Feedback content
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade700,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade100),
+                            ),
+                            child: Text(
+                              application.recruiterFeedback!,
+                              style: const TextStyle(
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -633,6 +676,7 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
       ),
     );
   }
+
 
   Color _getStatusColor(String status) {
     switch (status) {

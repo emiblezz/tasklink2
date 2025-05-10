@@ -373,29 +373,30 @@ class JobService with ChangeNotifier {
 
   // Fetch applications for a user
   Future<List<ApplicationModel>> fetchUserApplications(String userId) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
     try {
       final response = await _supabaseClient
           .from('applications')
-          .select()
+          .select('''
+          application_id,
+          job_id,
+          applicant_id,
+          application_status,
+          date_applied,
+          recruiter_feedback
+        ''')
           .eq('applicant_id', userId)
           .order('date_applied', ascending: false);
 
-      _applications = (response as List)
-          .map((app) => ApplicationModel.fromJson(app))
-          .toList();
+      final List<ApplicationModel> applications = [];
+      for (var item in response) {
+        applications.add(ApplicationModel.fromJson(item));
+      }
 
-      _isLoading = false;
+      _applications = applications;
       notifyListeners();
-      return _applications;
+      return applications;
     } catch (e) {
-      debugPrint('Error fetching applications: $e');
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
+      debugPrint('Error fetching user applications: $e');
       return [];
     }
   }

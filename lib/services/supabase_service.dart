@@ -394,67 +394,21 @@ class SupabaseService {
 
   Future<bool> saveRecruiterFeedback(int applicationId, String feedback) async {
     try {
-      debugPrint('Saving feedback for application ID: $applicationId');
+      debugPrint('Saving feedback for application ID: $applicationId using RPC');
 
-      // First get the application details for notification
-      final appDetails = await _supabaseClient
-          .from('applications')
-          .select('applicant_id, job_id')
-          .eq('application_id', applicationId)
-          .maybeSingle();
+      // Call the RPC function that handles both update and notification
+      final result = await _supabaseClient.rpc(
+          'save_recruiter_feedback',
+          params: {
+            'app_id': applicationId,
+            'feedback_text': feedback
+          }
+      );
 
-      if (appDetails == null) {
-        debugPrint('Application not found with ID: $applicationId');
-        return false;
-      }
-
-      // Update the application with the feedback
-      await _supabaseClient
-          .from('applications')
-          .update({
-        'recruiter_feedback': feedback,
-        'last_updated': DateTime.now().toIso8601String(),
-      })
-          .eq('application_id', applicationId);
-
-      // Create notification for the applicant about the feedback
-      if (appDetails['applicant_id'] != null) {
-        // Get job details for the notification
-        final jobDetails = await _supabaseClient
-            .from('jobs')
-            .select('job_title')
-            .eq('job_id', appDetails['job_id'])
-            .maybeSingle();
-
-        String jobTitle = 'a job';
-        if (jobDetails != null && jobDetails['job_title'] != null) {
-          jobTitle = jobDetails['job_title'];
-        }
-
-        try {
-          // Create notification
-          await _supabaseClient
-              .from('notifications')
-              .insert({
-            'user_id': appDetails['applicant_id'],
-            'notification_type': 'recruiter_feedback',
-            'notification_message': 'You\'ve received feedback on your application for "$jobTitle"',
-            'status': 'Unread',
-            'timestamp': DateTime.now().toIso8601String(),
-            'data': '{"job_id":"${appDetails['job_id']}","application_id":"$applicationId"}'
-          });
-
-          debugPrint('Feedback notification created for applicant');
-        } catch (notificationError) {
-          debugPrint('Error creating feedback notification: $notificationError');
-          // Continue even if notification creation fails
-        }
-      }
-
-      debugPrint('Feedback saved successfully');
-      return true;
+      debugPrint('Feedback save result: $result');
+      return result as bool;
     } catch (e) {
-      debugPrint('Error saving feedback: $e');
+      debugPrint('Error saving feedback via RPC: $e');
       return false;
     }
   }
