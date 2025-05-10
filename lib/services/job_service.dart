@@ -371,6 +371,43 @@ class JobService with ChangeNotifier {
     }
   }
 
+  // Add this method to your JobService class
+  Future<bool> clearAllApplications() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    if (_authService == null || _authService!.currentUser == null) {
+      _errorMessage = 'You must be logged in to manage applications';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+
+    final applicantId = _authService!.currentUser!.id;
+
+    try {
+      // Delete all applications for this user
+      await _supabaseClient
+          .from('applications')
+          .delete()
+          .eq('applicant_id', applicantId);
+
+      // Clear local applications list
+      _applications = [];
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error clearing applications: $e');
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   // Fetch applications for a user
   Future<List<ApplicationModel>> fetchUserApplications(String userId) async {
     try {

@@ -60,16 +60,36 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else {
-        // Show error message
+        // Show user-friendly error message
+        String errorMessage = 'Login failed';
+
+        if (authService.errorMessage != null) {
+          if (authService.errorMessage!.contains('Invalid login credentials')) {
+            errorMessage = 'Invalid email or password. Please check your credentials.';
+          } else if (authService.errorMessage!.contains('not found')) {
+            errorMessage = 'Account not found. Please register first.';
+          } else if (authService.errorMessage!.contains('too many requests')) {
+            errorMessage = 'Too many login attempts. Please try again later.';
+          } else if (authService.errorMessage!.contains('network')) {
+            errorMessage = 'Network error. Please check your internet connection.';
+          } else {
+            errorMessage = 'Unable to login. Please try again.';
+          }
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(authService.errorMessage ?? AppConstants.authErrorMessage),
-            backgroundColor: Colors.red,
+            content: Text(errorMessage),
+            backgroundColor: Colors.white,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     }
   }
+
+  // Handle Google sign in
+
 
   @override
   Widget build(BuildContext context) {
@@ -165,37 +185,24 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: authService.rememberMe,
-                      onChanged: (value) {
-                        if (value != null) {
-                          authService.rememberMe = value;
-                        }
-                      },
-                      activeColor: theme.colorScheme.primary,
-                    ),
-                    const Text('Remember me'),
 
-                    // This pushes the forgot password link to the right
-                    const Spacer(),
-
-                    // Forgot password link - keep your existing implementation here
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ForgotPasswordScreen(),
-                          ),
-                        );
-                      },
-                      child: const Text('Forgot Password?'),
-                    ),
-                  ],
+                // Forgot password link (now aligned to the right)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ForgotPasswordScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text('Forgot Password?'),
+                  ),
                 ),
 
+                const SizedBox(height: 16),
 
                 // Login button
                 ElevatedButton(
@@ -214,7 +221,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   )
                       : const Text('Log In'),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
                 // Register link
                 Row(
