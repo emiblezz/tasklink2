@@ -5,7 +5,7 @@ import 'package:tasklink2/models/application_model.dart';
 import 'package:tasklink2/models/job_model.dart';
 import 'package:tasklink2/models/resume_match_result_model.dart';
 import 'package:tasklink2/models/user_model.dart';
-import 'package:tasklink2/services/auth_service.dart';
+import 'package:tasklink2/services/ai_ranking_service.dart';
 import 'package:tasklink2/services/job_service.dart';
 import 'package:tasklink2/services/notification_service.dart';
 import 'package:tasklink2/services/ranking_service.dart';
@@ -49,6 +49,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
   bool _isMatchingPersonalResume = false;
   String? _personalResumeText;
   String? _currentUserId;
+  var score_value;
 
   // New state variables for recruiter feedback
   final Map<String, TextEditingController> _feedbackControllers = {};
@@ -226,6 +227,24 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
 
+  List<List<String>> classifySkills(List<WordMatch> wordMatches) {
+    final matchedSkills = <String>[];
+    final missedSkills = <String>[];
+
+    for (var match in wordMatches) {
+      final score = match.score;
+      final skill = match.resumeWord;
+
+      if (score >= 0.6) {
+        matchedSkills.add(skill);
+      } else {
+        missedSkills.add(skill);
+      }
+    }
+
+    return [matchedSkills, missedSkills];
+  }
+
   Future<void> _fetchRankedApplications() async {
     if (_currentUserId == null || !mounted) return;
 
@@ -240,6 +259,22 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
           widget.job.id!.toString()  // Ensure string type
       );
 
+      print("ID ${widget.job.id!.toString()}");
+
+      final similarityService = SimilarityService(
+        baseUrl: 'http://192.168.1.6:8000',
+      );
+
+      String resume = "I am a python developer";
+      String jobDescription = "I am a python developer";
+
+      print("test");
+      score_value = await similarityService.checkSimilarity(resume: resume, jobDescription: jobDescription, threshold: 0.7);
+
+      print(score_value.toString());
+      print("Value: ${score_value.similarityScore}");
+      print("Not Empty: ${matchResults.isNotEmpty}");
+
       if (!mounted) return;  // Check if widget is still mounted
 
       if (matchResults.isNotEmpty) {
@@ -248,42 +283,25 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
 
         for (final result in matchResults) {
           try {
+            print("Applicant ${result.applicantId}");
             final appData = await AppConfig().supabaseClient
                 .from('applications')
-                .select('*, applicant:profiles(*)')
+                .select('*')
                 .eq('applicant_id', result.applicantId)
                 .eq('job_id', widget.job.id)
                 .single();
 
-            // Extract matched and missing skills from word matches
-            final List<String> matchedSkills = result.wordMatches
-                .where((match) => match.score > 0.7)
-                .map((match) => match.resumeWord)
-                .toSet()
-                .toList();
+            var skills = classifySkills(score_value.wordMatches);
 
-            final List<String> missingSkills = result.wordMatches
-                .where((match) => match.score < 0.4)
-                .map((match) => match.jobWord)
-                .toSet()
-                .toList();
-
-            // Initialize the feedback controller for this application
-            final String applicantId = result.applicantId;
-            if (!_feedbackControllers.containsKey(applicantId)) {
-              _feedbackControllers[applicantId] = TextEditingController(
-                  text: appData['recruiter_feedback'] ?? ''
-              );
-            }
+            print("Skills: $skills");
 
             applicationsList.add({
               'application': appData,
-              'score': result.similarityScore,
-              'matching_skills': matchedSkills,
-              'missing_skills': missingSkills,
-              'decision': result.decision,
-              'improvement_suggestions': result.improvementSuggestions,
-              'recruiter_feedback': appData['recruiter_feedback'],
+              'score': score_value.similarityScore,
+              'matching_skills': skills[0],
+              'missing_skills': skills[1],
+              'decision': score_value.decision,
+              // 'improvement_suggestions': result.improvementSuggestions,
             });
           } catch (e) {
             debugPrint('Error loading application data for ${result.applicantId}: $e');
@@ -293,6 +311,8 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
 
         // Sort by score in descending order
         applicationsList.sort((a, b) => (b['score'] as num).compareTo(a['score'] as num));
+
+        print("Applist: $applicationsList");
 
         if (!mounted) return;
 
@@ -315,6 +335,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
 
+// Rename to avoid duplicate method name
   Future<void> _performRanking() async {
     if (!mounted) return;
 
@@ -326,7 +347,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     try {
       final rankedApplications = await _rankingService.rankApplications(
         widget.job.id!.toString(),  // Ensure string type
-        widget.job.description!,
+        widget.job.description,
       );
 
       if (!mounted) return;
@@ -344,7 +365,6 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
       });
     }
   }
-
   // New method to handle application status updates
   Future<void> _updateApplicationStatus(int applicationId, String status) async {
     try {
