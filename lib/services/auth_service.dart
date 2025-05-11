@@ -132,6 +132,17 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
+      debugPrint("Checking if email already exists: $email");
+
+      // Check if user already exists with this email
+      final userExists = await userEmailExists(email);
+      if (userExists) {
+        _errorMessage = "An account with this email already exists. Please log in instead.";
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
       debugPrint("Registering user with email: $email, role: $roleId");
 
       // Create the auth user with redirectTo for email confirmation
@@ -181,7 +192,6 @@ class AuthService extends ChangeNotifier {
       return false;
     }
   }
-
   // Log in a user
   Future<bool> login({
     required String email,
@@ -279,6 +289,27 @@ class AuthService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  Future<bool> userEmailExists(String email) async {
+    try {
+      debugPrint("Checking if user with email exists: $email");
+
+      // Use a Supabase query to check if the email already exists in the users table
+      final response = await _supabaseClient
+          .from('users')
+          .select('email')
+          .eq('email', email)
+          .limit(1);
+
+      // In the updated Supabase client, we directly get the data
+      // If there's an error, it would throw an exception
+      final data = response as List<dynamic>;
+      return data.isNotEmpty;
+    } catch (e) {
+      debugPrint("Error checking if user exists: $e");
+      return false; // In case of error, proceed with registration attempt
     }
   }
 

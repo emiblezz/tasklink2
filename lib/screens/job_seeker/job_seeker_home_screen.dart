@@ -623,23 +623,16 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Stack(
                       children: [
-                        // Feedback indicator badge (if available)
-
-
+                        // Main card content - always navigates to job details
                         InkWell(
                           onTap: () {
-                            // If there's feedback, show it in a dialog
-                            if (hasFeedback) {
-                              _showFeedbackDialog(context, application.recruiterFeedback!);
-                            } else {
-                              // Otherwise just navigate to job details
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => JobDetailScreen(job: job),
-                                ),
-                              );
-                            }
+                            // Always navigate to job details when tapping the main card
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => JobDetailScreen(job: job),
+                              ),
+                            );
                           },
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
@@ -740,12 +733,33 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
                                   ],
                                 ),
 
-                                // Feedback indicator at the bottom of the card
+                                // Add space where the feedback indicator will be
                                 if (hasFeedback) ...[
                                   const SizedBox(height: 12),
                                   const Divider(height: 1),
-                                  const SizedBox(height: 12),
-                                  Row(
+                                  const SizedBox(height: 38), // Space for the feedback indicator
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // Feedback indicator at the bottom of the card - separate tappable area
+                        if (hasFeedback)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  // Only show feedback dialog when tapping this specific area
+                                  _showFeedbackDialog(context, application.recruiterFeedback!);
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0, top: 8.0),
+                                  child: Row(
                                     children: [
                                       const Icon(
                                         Icons.feedback_outlined,
@@ -770,11 +784,10 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
                                       ),
                                     ],
                                   ),
-                                ],
-                              ],
+                                ),
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),

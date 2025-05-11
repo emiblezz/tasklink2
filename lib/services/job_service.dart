@@ -473,6 +473,132 @@ class JobService with ChangeNotifier {
     }
   }
 
+  // Add these methods to your JobService class
+
+// Get the total number of applications for all jobs by this recruiter
+  Future<int> getTotalApplicationsCount(String recruiterId) async {
+    try {
+      // First get all job IDs for this recruiter
+      final jobs = await fetchRecruiterJobs(recruiterId);
+
+      if (jobs.isEmpty) {
+        return 0;
+      }
+
+      final jobIds = jobs.map((job) => job.id).toList();
+
+      // Count applications for these jobs
+      final response = await _supabaseClient
+          .from('applications')
+          .select('application_id')
+          .in_('job_id', jobIds);
+
+      return response.length;
+    } catch (e) {
+      debugPrint('Error getting application count: $e');
+      return 0;
+    }
+  }
+
+// Get the total number of AI-ranked applications for all jobs by this recruiter
+  Future<int> getTotalRankedApplicationsCount(String recruiterId) async {
+    try {
+      // First get all job IDs for this recruiter
+      final jobs = await fetchRecruiterJobs(recruiterId);
+
+      if (jobs.isEmpty) {
+        return 0;
+      }
+
+      final jobIds = jobs.map((job) => job.id).toList();
+
+      // Count CV rankings for these jobs
+      final response = await _supabaseClient
+          .from('cv_rankings')
+          .select('id')
+          .in_('job_id', jobIds);
+
+      return response.length;
+    } catch (e) {
+      debugPrint('Error getting ranked application count: $e');
+      return 0;
+    }
+  }
+
+// Get application count for a single job
+  Future<int> getApplicationCountForJob(int jobId) async {
+    try {
+      final response = await _supabaseClient
+          .from('applications')
+          .select('application_id')
+          .eq('job_id', jobId);
+
+      return response.length;
+    } catch (e) {
+      debugPrint('Error getting application count for job $jobId: $e');
+      return 0;
+    }
+  }
+
+// Get only applications for a specific job
+  Future<List<ApplicationModel>> getApplicationsForJob(int jobId) async {
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      notifyListeners();
+
+      final response = await _supabaseClient
+          .from('applications')
+          .select()
+          .eq('job_id', jobId)
+          .order('date_applied', ascending: false);
+
+      final List<ApplicationModel> applications = [];
+
+      for (final item in response) {
+        try {
+          applications.add(ApplicationModel(
+            id: item['application_id'],
+            jobId: item['job_id'],
+            applicantId: item['applicant_id'],
+            applicationStatus: item['application_status'],
+            dateApplied: item['date_applied'] != null
+                ? DateTime.parse(item['date_applied'])
+                : DateTime.now(),
+            recruiterFeedback: item['recruiter_feedback'],
+          ));
+        } catch (e) {
+          debugPrint('Error parsing application: $e');
+        }
+      }
+
+      _isLoading = false;
+      notifyListeners();
+      return applications;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return [];
+    }
+  }
+
+// Get CV ranking information for a job
+  Future<List<Map<String, dynamic>>> getCVRankingsForJob(int jobId) async {
+    try {
+      final response = await _supabaseClient
+          .from('cv_rankings')
+          .select()
+          .eq('job_id', jobId)
+          .order('similarity_score', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error getting CV rankings for job $jobId: $e');
+      return [];
+    }
+  }
+
   // Delete an application
   Future<bool> deleteApplication(int applicationId) async {
     _isLoading = true;

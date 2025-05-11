@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:math' as Math;
 
 import 'package:flutter/cupertino.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase/supabase.dart';
 import 'package:tasklink2/config/app_config.dart';
 import 'package:tasklink2/models/user_model.dart';
@@ -414,7 +416,92 @@ class SupabaseService {
   }
   // Add this method to your SupabaseService class to handle application status updates
 
-  // Add this method to your SupabaseService class to handle application status updates
+  Future<String?> getDirectCVDownloadUrl(String storagePath) async {
+    try {
+      // Remove any leading slashes from storage path
+      final path = storagePath.startsWith('/') ? storagePath.substring(1) : storagePath;
+
+      // If the path already is a full URL, return it directly
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        return path;
+      }
+
+      // Determine which bucket to use
+      String bucket = 'resume';
+
+      // If the path includes the bucket name, extract it
+      if (path.contains('/')) {
+        final parts = path.split('/');
+        if (parts.length > 1) {
+          bucket = parts[0];
+          // Remove bucket from path
+          final pathWithoutBucket = parts.sublist(1).join('/');
+
+          debugPrint('Using bucket: $bucket, path: $pathWithoutBucket');
+
+          // Create a signed URL with extended expiry time
+          final signedUrl = supabaseClient.storage
+              .from(bucket)
+              .createSignedUrl(pathWithoutBucket, 3600); // 1 hour
+
+          return signedUrl;
+        }
+      }
+
+      // Default case: just try to get public URL from resume bucket
+      return supabaseClient.storage.from(bucket).getPublicUrl(path);
+    } catch (e) {
+      debugPrint('Error getting direct CV download URL: $e');
+      return null;
+    }
+  }
+
+// Downloads a file from URL and returns its local path
+  Future<String?> downloadFileFromUrl(String url, String filename) async {
+    try {
+      // Get the response from the URL
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download file: HTTP ${response.statusCode}');
+      }
+
+      // Get temporary directory
+      final directory = await getTemporaryDirectory();
+      final filePath = '${directory.path}/$filename';
+
+      // Write to a file
+      final file = File(filePath);
+      await file.writeAsBytes(response.bodyBytes);
+
+      return filePath;
+    } catch (e) {
+      debugPrint('Error downloading file: $e');
+      return null;
+    }
+  }
+
+// Get CV download URL from the profile
+  Future<String?> getCVDownloadUrl(String userId) async {
+    try {
+      // Get the jobseeker profile
+      final profile = await getJobseekerProfile(userId);
+
+      if (profile == null || profile['cv'] == null || profile['cv'].toString().isEmpty) {
+        debugPrint('No CV found in profile for user ID: $userId');
+        return null;
+      }
+
+      final cvPath = profile['cv'].toString();
+      debugPrint('CV path from profile: $cvPath');
+
+      // Get direct download URL
+      return await getDirectCVDownloadUrl(cvPath);
+    } catch (e) {
+      debugPrint('Error getting CV download URL: $e');
+      return null;
+    }
+  }
 
   Future<bool> updateApplicationStatus(int applicationId, String status) async {
     try {

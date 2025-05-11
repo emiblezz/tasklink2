@@ -16,7 +16,7 @@ class AppConstants {
   static const String generalErrorMessage = 'An error occurred. Please try again later.';
 
   // Success messages
-  static const String registrationSuccessMessage = 'Registration successful! Please log in.';
+  static const String registrationEmailConfirmMessage = 'Registration submitted! Please check your email to confirm your account.';
   static const String loginSuccessMessage = 'Login successful!';
 
   // Validation messages

@@ -47,6 +47,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // Handle registration
+  // Handle registration
   Future<void> _register() async {
     if (_formKey.currentState?.validate() ?? false) {
       final authService = Provider.of<AuthService>(context, listen: false);
@@ -62,11 +63,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
 
       if (success) {
-        // Show success message
+        // Show email confirmation message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(AppConstants.registrationSuccessMessage),
+            content: Text('Registration submitted! Please check your email to confirm your account.'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 8), // Give more time for this important message
           ),
         );
 
@@ -83,7 +85,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
