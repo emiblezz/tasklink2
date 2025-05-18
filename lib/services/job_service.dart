@@ -201,7 +201,7 @@ class JobService with ChangeNotifier {
   }
 
   // Create a new job
-  Future<bool> createJob(JobModel job) async {
+  Future<int?> createJob(JobModel job) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -211,7 +211,17 @@ class JobService with ChangeNotifier {
       // Remove the ID field when creating a new job
       jobData.remove('job_id');
 
-      await _supabaseClient.from('job_postings').insert(jobData);
+      // Use select() to get the inserted row including the auto-generated ID
+      final response = await _supabaseClient
+          .from('job_postings')
+          .insert(jobData)
+          .select();
+
+      // Extract the job ID
+      int? jobId;
+      if (response != null && response is List && response.isNotEmpty) {
+        jobId = response[0]['job_id'];
+      }
 
       // Refresh the job list
       if (job.recruiterId != null) {
@@ -222,13 +232,13 @@ class JobService with ChangeNotifier {
 
       _isLoading = false;
       notifyListeners();
-      return true;
+      return jobId;
     } catch (e) {
       debugPrint('Error creating job: $e');
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
-      return false;
+      return null;
     }
   }
 

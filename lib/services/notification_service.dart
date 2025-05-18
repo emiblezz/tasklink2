@@ -33,7 +33,28 @@ class NotificationService extends ChangeNotifier {
 
       if (response != null && response is List) {
         _notifications = response
-            .map<NotificationModel>((json) => NotificationModel.fromJson(json))
+            .map<NotificationModel>((json) {
+          // Add the derived icon name based on type before creating the model
+          var notificationJson = Map<String, dynamic>.from(json);
+
+          // Manual processing for presentation in the app
+          try {
+            final type = notificationJson['notification_type'] ?? '';
+            final iconName = _getIconForType(type);
+
+            // This is not used for database operations, just for the app UI
+            notificationJson['icon_name'] = iconName;
+
+            // Process message to extract embedded data if needed
+            final message = notificationJson['notification_message'] ?? '';
+
+            // Add additional data here if needed for UI purposes
+            return NotificationModel.fromJson(notificationJson);
+          } catch (e) {
+            debugPrint('Error processing notification: $e');
+            return NotificationModel.fromJson(json);
+          }
+        })
             .toList();
 
         _unreadCount = _notifications.where((n) => n.status == 'Unread').length;
@@ -65,23 +86,34 @@ class NotificationService extends ChangeNotifier {
     try {
       debugPrint('Creating notification for user: $userId, type: $notificationType');
 
+      // Process data if available and add to message
+      String finalMessage = message;
+      if (data != null && data.isNotEmpty) {
+        // For job-related notifications, add job ID to the message
+        if (data.containsKey('job_id')) {
+          finalMessage = '$message [jobId:${data['job_id']}]';
+        }
+
+        // If we have application ID, add it too
+        if (data.containsKey('application_id')) {
+          finalMessage = '$finalMessage [appId:${data['application_id']}]';
+        }
+
+        debugPrint('Encoded data in message: $finalMessage');
+      }
+
+      // Create notification with only the fields that exist in the database
       final notification = {
         'user_id': userId,
         'notification_type': notificationType,
-        'notification_message': message,
+        'notification_message': finalMessage,
         'timestamp': DateTime.now().toIso8601String(),
         'status': 'Unread',
-        'icon_name': _getIconForType(notificationType),
+        // Removed icon_name and data fields as they don't exist in the DB
       };
 
-      // Add data if provided
-      if (data != null) {
-        notification['data'] = jsonEncode(data);
-      }
-
-      await _supabase.from('notifications').insert(notification);
-
-      debugPrint('Notification created successfully');
+      final response = await _supabase.from('notifications').insert(notification);
+      debugPrint('Notification created successfully: $response');
 
       // If this notification is for the user whose notifications we're currently displaying
       // then refresh the list
@@ -90,6 +122,10 @@ class NotificationService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error creating notification: $e');
+      // Log more detailed error information
+      if (e is PostgrestException) {
+        debugPrint('PostgrestError details: ${e.message}, code: ${e.code}');
+      }
     }
   }
 
@@ -104,23 +140,34 @@ class NotificationService extends ChangeNotifier {
     try {
       debugPrint('Sending notification to user: $userId, type: $type');
 
+      // Process data if available and add to message
+      String finalMessage = body;
+      if (data != null && data.isNotEmpty) {
+        // For job-related notifications, add job ID to the message
+        if (data.containsKey('job_id')) {
+          finalMessage = '$body [jobId:${data['job_id']}]';
+        }
+
+        // If we have application ID, add it too
+        if (data.containsKey('application_id')) {
+          finalMessage = '$finalMessage [appId:${data['application_id']}]';
+        }
+
+        debugPrint('Encoded data in message: $finalMessage');
+      }
+
+      // Create notification with only the fields that exist in the database
       final notification = {
         'user_id': userId,
         'notification_type': type,
-        'notification_message': body,
+        'notification_message': finalMessage,
         'timestamp': DateTime.now().toIso8601String(),
         'status': 'Unread',
-        'icon_name': _getIconForType(type),
+        // Removed icon_name and data fields as they don't exist in the DB
       };
 
-      // Add data if provided
-      if (data != null) {
-        notification['data'] = jsonEncode(data);
-      }
-
-      await _supabase.from('notifications').insert(notification);
-
-      debugPrint('Notification sent successfully');
+      final response = await _supabase.from('notifications').insert(notification);
+      debugPrint('Notification sent successfully: $response');
 
       // If this notification is for the user whose notifications we're currently displaying
       // then refresh the list
@@ -129,6 +176,10 @@ class NotificationService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error sending notification: $e');
+      // Log more detailed error information
+      if (e is PostgrestException) {
+        debugPrint('PostgrestError details: ${e.message}, code: ${e.code}');
+      }
     }
   }
 
@@ -220,6 +271,32 @@ class NotificationService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error getting unread count: $e');
       return 0;
+    }
+  }
+
+  // Test notification creation - use this to test permissions
+  Future<bool> testNotificationCreation(String userId) async {
+    try {
+      debugPrint('Testing notification creation for user: $userId');
+
+      // Create a test notification with only fields that exist in the database
+      final testNotification = {
+        'user_id': userId,
+        'notification_type': 'test',
+        'notification_message': 'This is a test notification',
+        'status': 'Unread',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      final response = await _supabase.from('notifications').insert(testNotification);
+      debugPrint('Test notification created successfully: $response');
+      return true;
+    } catch (e) {
+      debugPrint('Test notification creation failed: $e');
+      if (e is PostgrestException) {
+        debugPrint('PostgrestError details: ${e.message}, code: ${e.code}');
+      }
+      return false;
     }
   }
 
@@ -327,7 +404,7 @@ class NotificationService extends ChangeNotifier {
     required List<String> jobSeekerIds,
     required String jobTitle,
     required String companyName,
-    int? jobId,
+    int? jobId, // Make sure this is nullable
   }) async {
     debugPrint('Creating new job notifications for ${jobSeekerIds.length} job seekers');
 
@@ -343,12 +420,13 @@ class NotificationService extends ChangeNotifier {
         userId: userId,
         notificationType: 'job_match',
         message: 'New job opportunity: $jobTitle at $companyName',
-        data: data,
+        data: data, // This will be null if jobId is null
       );
     }
   }
 
   // Helper method to determine icon based on notification type
+  // This is used only for UI purposes, not for database operations
   String _getIconForType(String type) {
     switch (type) {
       case 'application':

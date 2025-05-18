@@ -70,6 +70,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
 
     // Initialize notification service
     _notificationService = Provider.of<NotificationService>(context, listen: false);
+
   }
 
   @override
@@ -1125,6 +1126,106 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     return const Center(child: Text("Analytics Tab"));
   }
 
+  Widget _buildScoreIndicator(double score) {
+    return Row(
+      children: [
+        Container(
+          width: 120,
+          height: 12,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            color: Colors.grey.shade200,
+          ),
+          child: Row(
+            children: [
+              // Green zone (80-100%)
+              Container(
+                width: 120 * 0.2, // 20% of total width
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(6),
+                    bottomLeft: Radius.circular(6),
+                  ),
+                  color: Colors.green.shade200,
+                ),
+              ),
+              // Yellow zone (65-80%)
+              Container(
+                width: 120 * 0.15, // 15% of total width
+                color: Colors.lightGreen.shade200,
+              ),
+              // Orange zone (50-65%)
+              Container(
+                width: 120 * 0.15, // 15% of total width
+                color: Colors.orange.shade200,
+              ),
+              // Red zone (0-50%)
+              Container(
+                width: 120 * 0.5, // 50% of total width
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(6),
+                    bottomRight: Radius.circular(6),
+                  ),
+                  color: Colors.red.shade200,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Indicator of current score
+        Container(
+          margin: EdgeInsets.only(top: -10, left: score * 120 - 8),
+          child: Icon(
+            Icons.arrow_drop_down,
+            color: _getScoreColor(score),
+            size: 24,
+          ),
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildDecisionLabel(String decision) {
+    Color bgColor;
+    Color textColor;
+
+    switch (decision) {
+      case "Strong Match":
+        bgColor = Colors.green.shade100;
+        textColor = Colors.green.shade800;
+        break;
+      case "Good Match":
+        bgColor = Colors.lightGreen.shade100;
+        textColor = Colors.green.shade700;
+        break;
+      case "Potential Match":
+        bgColor = Colors.orange.shade100;
+        textColor = Colors.orange.shade800;
+        break;
+      default: // "No Match"
+        bgColor = Colors.red.shade100;
+        textColor = Colors.red.shade800;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        decision,
+        style: TextStyle(
+          color: textColor,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Pending':
@@ -1138,11 +1239,12 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
 
-  Color _getScoreColor(double score) {
-    if (score >= 0.8) return Colors.green;
-    if (score >= 0.6) return Colors.blue;
-    if (score >= 0.4) return Colors.orange;
-    return Colors.red;
+  Color _getScoreColor(double? score) {
+    if (score == null) return Colors.grey;
+    if (score >= 0.80) return Colors.green.shade700;
+    if (score >= 0.65) return Colors.green.shade500;
+    if (score >= 0.50) return Colors.orange.shade500;
+    return Colors.red.shade500;
   }
 
   String _formatDate(DateTime date) {

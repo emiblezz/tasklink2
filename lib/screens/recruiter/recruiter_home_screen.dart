@@ -21,6 +21,7 @@ import 'package:tasklink2/widgets/job_card.dart';
 import 'package:tasklink2/widgets/notification_badge.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../services/notification_service.dart';
 import '../../services/recruiter_profile_service.dart';
 import '../help_desk_screen.dart';
 import '../settings_screen.dart';
@@ -3609,4 +3610,6 @@ class _StatCard extends StatelessWidget {
       ),
     );
   }
+  // Add this to your NotificationService class or somewhere appropriate
+
 }

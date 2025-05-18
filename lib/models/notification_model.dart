@@ -8,8 +8,9 @@ class NotificationModel {
   final String type;
   final String status;
   final DateTime? createdAt;
-  final String? iconName;
-  final Map<String, dynamic>? data;
+  // We'll keep these properties in the model for UI purposes, but handle them differently when interacting with the database
+  final String? iconName; // Not in DB, derived from type
+  final Map<String, dynamic>? data; // Not in DB
 
   NotificationModel({
     required this.id,
@@ -23,7 +24,8 @@ class NotificationModel {
   });
 
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
-    return NotificationModel(
+    // Extract the base notification
+    final notification = NotificationModel(
       id: json['notification_id'],
       userId: json['user_id'],
       message: json['notification_message'] ?? json['message'] ?? '',
@@ -32,16 +34,17 @@ class NotificationModel {
       createdAt: json['timestamp'] != null
           ? DateTime.parse(json['timestamp'])
           : (json['created_at'] != null ? DateTime.parse(json['created_at']) : null),
-      iconName: json['icon_name'],
-      data: json['data'] != null
-          ? (json['data'] is String
-          ? jsonDecode(json['data'])
-          : json['data'])
-          : null,
+      // Derive iconName from type since it's not in the database
+      iconName: _getIconForType(json['notification_type'] ?? json['type'] ?? ''),
+      // Handle data carefully as it's not in the database schema
+      data: null,
     );
+
+    return notification;
   }
 
   Map<String, dynamic> toJson() {
+    // Only include fields that exist in the database
     return {
       'notification_id': id,
       'user_id': userId,
@@ -49,9 +52,42 @@ class NotificationModel {
       'notification_type': type,
       'status': status,
       'timestamp': createdAt?.toIso8601String(),
-      'icon_name': iconName,
-      'data': data != null ? jsonEncode(data) : null,
+      // Omit iconName and data as they don't exist in DB
     };
+  }
+
+  // For database insert operations, create a special method
+  Map<String, dynamic> toDbJson() {
+    // Only include fields that exist in the database
+    return {
+      // Don't include notification_id as it's auto-generated
+      'user_id': userId,
+      'notification_message': message,
+      'notification_type': type,
+      'status': status,
+      'timestamp': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
+    };
+  }
+
+  // Helper method to derive an icon from notification type
+  static String? _getIconForType(String type) {
+    switch (type) {
+      case 'application':
+        return 'description';
+      case 'application_update':
+      case 'status_update':
+        return 'update';
+      case 'job_match':
+        return 'work';
+      case 'recruiter_feedback':
+        return 'comment';
+      case 'message':
+        return 'mail';
+      case 'test':
+        return 'notifications';
+      default:
+        return 'notifications';
+    }
   }
 
   // Add the copyWith method

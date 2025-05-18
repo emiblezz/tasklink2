@@ -565,5 +565,6 @@ class SupabaseService {
     }
   }
 
+
 // Get job applications with user profiles - Improved version with join
 }
