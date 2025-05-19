@@ -8,6 +8,8 @@ import 'package:tasklink2/screens/recruiter/create_job_screen.dart';
 import 'package:tasklink2/screens/recruiter/cv_ranking_screen.dart';
 import 'package:tasklink2/config/app_config.dart';
 
+import '../services/notification_service.dart';
+
 class JobDetailScreen extends StatefulWidget {
   final JobModel job;
   final bool isRecruiter;
@@ -129,7 +131,23 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
 
       if (mounted) {
-        if (result != null) {
+        if (widget.job.recruiterId != null) {
+          // Application was successful, now send a notification to the recruiter
+          try {
+            final notificationService = Provider.of<NotificationService>(context, listen: false);
+
+            await notificationService.notifyJobApplication(
+              recruiterId: widget.job.recruiterId!, // Use ! to assert non-null
+              jobTitle: widget.job.jobTitle,
+              applicantName: authService.currentUser!.name,
+              jobId: widget.job.id,
+              applicantId: authService.currentUser!.id,
+            );
+            debugPrint('Recruiter notification sent successfully');
+          } catch (e) {
+            debugPrint('Failed to send recruiter notification: $e');
+          }
+
           setState(() {
             _applicationStatus = 'Pending';
           });

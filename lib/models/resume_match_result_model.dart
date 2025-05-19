@@ -1,31 +1,3 @@
-class WordMatchModel {
-  final String resumeWord;
-  final String jobWord;
-  final double score;
-
-  WordMatchModel({
-    required this.resumeWord,
-    required this.jobWord,
-    required this.score
-  });
-
-  factory WordMatchModel.fromJson(Map<String, dynamic> json) {
-    return WordMatchModel(
-      resumeWord: json['resume_word'] ?? '',
-      jobWord: json['best_job_word'] ?? '',
-      score: (json['score'] ?? 0.0).toDouble(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'resume_word': resumeWord,
-      'best_job_word': jobWord,
-      'score': score,
-    };
-  }
-}
-
 class ResumeMatchResultModel {
   final String id;
   final String jobId;
@@ -34,8 +6,7 @@ class ResumeMatchResultModel {
   final double similarityScore;
   final String decision;
   final List<WordMatchModel> wordMatches;
-  final String? feedback;
-  final String? improvementSuggestions;
+  final String improvementSuggestions;
 
   ResumeMatchResultModel({
     required this.id,
@@ -45,32 +16,29 @@ class ResumeMatchResultModel {
     required this.similarityScore,
     required this.decision,
     required this.wordMatches,
-    this.feedback,
-    this.improvementSuggestions,
+    required this.improvementSuggestions,
   });
 
   factory ResumeMatchResultModel.fromJson(Map<String, dynamic> json) {
+    final List<dynamic> wordMatchesJson = json['word_matches'] ?? [];
+    final List<WordMatchModel> wordMatches = wordMatchesJson
+        .map((match) => WordMatchModel.fromJson(match))
+        .toList();
+
     return ResumeMatchResultModel(
       id: json['id'],
-      jobId: json['job_id'].toString(), // Convert to string regardless of original type
+      jobId: json['job_id'],
       applicantId: json['applicant_id'],
-      matchDate: json['match_date'] != null
-          ? DateTime.parse(json['match_date'])
-          : DateTime.now(),
-      similarityScore: json['similarity_score'] is int
-          ? (json['similarity_score'] as int).toDouble()
-          : json['similarity_score'] as double,
-      decision: json['decision'] ?? 'No Match',
-      wordMatches: json['word_matches'] != null
-          ? (json['word_matches'] as List)
-          .map((match) => WordMatchModel.fromJson(match))
-          .toList()
-          : [],
-      improvementSuggestions: json['improvement_suggestions'],
+      matchDate: DateTime.parse(json['match_date']),
+      similarityScore: json['similarity_score'] ?? 0.0,
+      decision: json['decision'] ?? getDecisionFromScore(json['similarity_score'] ?? 0.0),
+      wordMatches: wordMatches,
+      improvementSuggestions: json['improvement_suggestions'] ??
+          generateImprovementSuggestions(json['similarity_score'] ?? 0.0, wordMatches, json),
     );
   }
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toDbJson() {
     return {
       'id': id,
       'job_id': jobId,
@@ -78,64 +46,61 @@ class ResumeMatchResultModel {
       'match_date': matchDate.toIso8601String(),
       'similarity_score': similarityScore,
       'decision': decision,
-      'word_matches': wordMatches.map((match) => match.toJson()).toList(),
-      'feedback': feedback,
+      'word_matches': wordMatches.map((wm) => wm.toJson()).toList(),
       'improvement_suggestions': improvementSuggestions,
     };
   }
 
-  // Create a simplified map for storing in database
-  Map<String, dynamic> toDbJson() {
-    return {
-      'id': id,
-      'job_id': jobId.toString(), // Ensure string format for job_id
-      'applicant_id': applicantId,
-      'match_date': matchDate.toIso8601String(),
-      'similarity_score': similarityScore,
-      'decision': decision,
-      'word_matches': wordMatches.map((match) => match.toJson()).toList(),
-      'improvement_suggestions': improvementSuggestions,
-    };
-  }
-
-  // Generate improvement suggestions based on match results
+  // Updated method to generate improvement suggestions based on new scoring tiers
   static String generateImprovementSuggestions(
-      double score,
-      List<WordMatchModel> wordMatches,
-      Map<String, dynamic> rawApiResponse
-      ) {
-    List<String> suggestions = [];
+      double score, List<WordMatchModel> wordMatches, Map<String, dynamic> matchResult) {
 
-    // Suggestion based on overall score
-    if (score < 0.6) {
-      suggestions.add("Your resume has a low match score with this job. Consider revising your resume to better align with the job requirements.");
-    } else if (score < 0.75) {
-      suggestions.add("Your resume is moderately matched to this job. Some targeted improvements could increase your chances.");
+    final missingSkills = matchResult['missing_skills'] ?? [];
+
+    if (score >= 0.80) {
+      return "Excellent candidate with all key skills and experience required.";
+    } else if (score >= 0.65) {
+      return "Good candidate with most key skills. ${missingSkills.isNotEmpty ? 'Could improve by adding: ${missingSkills.take(3).join(', ')}.' : ''}";
+    } else if (score >= 0.50) {
+      return "Has some relevant skills but lacks key requirements. Consider adding: ${missingSkills.take(4).join(', ')}.";
+    } else {
+      return "Not a good match for this role. Missing critical skills: ${missingSkills.take(5).join(', ')}.";
     }
+  }
 
-    // Get words with low match scores
-    final poorMatches = wordMatches
-        .where((match) => match.score < 0.6)
-        .take(5)
-        .map((match) => "${match.resumeWord} -> ${match.jobWord}")
-        .toList();
+  // Helper method to get decision from score
+  static String getDecisionFromScore(double score) {
+    if (score >= 0.80) return "Strong Match";
+    if (score >= 0.65) return "Good Match";
+    if (score >= 0.50) return "Potential Match";
+    return "No Match";
+  }
+}
 
-    if (poorMatches.isNotEmpty) {
-      suggestions.add("Consider clarifying these terms in your resume: ${poorMatches.join(', ')}");
-    }
+class WordMatchModel {
+  final String resumeWord;
+  final String jobWord;
+  final double score;
 
-    // If we have missing skills data (from your original ranking logic)
-    if (rawApiResponse.containsKey('missing_skills')) {
-      final missingSkills = rawApiResponse['missing_skills'];
-      if (missingSkills is List && missingSkills.isNotEmpty) {
-        suggestions.add("Consider adding these skills to your profile if you have them: ${missingSkills.take(5).join(', ')}");
-      }
-    }
+  WordMatchModel({
+    required this.resumeWord,
+    required this.jobWord,
+    required this.score,
+  });
 
-    if (suggestions.isEmpty) {
-      return "Your resume is well-matched to this job. No specific improvements needed.";
-    }
+  factory WordMatchModel.fromJson(Map<String, dynamic> json) {
+    return WordMatchModel(
+      resumeWord: json['resume_word'] ?? '',
+      jobWord: json['best_job_word'] ?? json['job_word'] ?? '',
+      score: json['score'] ?? 0.0,
+    );
+  }
 
-    return suggestions.join("\n\n");
+  Map<String, dynamic> toJson() {
+    return {
+      'resume_word': resumeWord,
+      'best_job_word': jobWord,
+      'score': score,
+    };
   }
 }

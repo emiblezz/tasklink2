@@ -21,6 +21,8 @@ import 'package:tasklink2/widgets/job_card.dart';
 import 'package:tasklink2/widgets/notification_badge.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../services/notification_service.dart';
+import '../../services/recruiter_profile_service.dart';
 import '../help_desk_screen.dart';
 import '../settings_screen.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +34,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+
+import 'edit_recruiter_profile_screen.dart';
 
 class RecruiterHomeScreen extends StatefulWidget {
   const RecruiterHomeScreen({super.key});
@@ -80,43 +84,6 @@ class _RecruiterHomeScreenState extends State<RecruiterHomeScreen> {
       appBar: AppBar(
         title: const Text('TaskLink Recruiter'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.work_outline),
-            tooltip: 'Manage Job Postings',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const RecruiterJobsScreen(),
-                ),
-              ).then((_) {
-                // Refresh data when returning from jobs screen
-                _loadInitialData();
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const SettingsScreen(isRecruiter: true),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const HelpDeskScreen(isRecruiter: true),
-                ),
-              );
-            },
-          ),
           NotificationBadge(
             child: IconButton(
               icon: const Icon(Icons.notifications, color: Colors.white),
@@ -180,8 +147,85 @@ class _RecruiterHomeScreenState extends State<RecruiterHomeScreen> {
 }
 
 // Dashboard Tab
-class _DashboardTab extends StatelessWidget {
+// Dashboard Tab
+class _DashboardTab extends StatefulWidget {
   const _DashboardTab();
+
+  @override
+  State<_DashboardTab> createState() => _DashboardTabState();
+}
+
+class _DashboardTabState extends State<_DashboardTab> {
+  int _totalApplications = 0;
+  int _rankedApplications = 0;
+  bool _isLoadingCounts = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApplicationCounts();
+  }
+
+  Future<void> _loadApplicationCounts() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingCounts = true;
+    });
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final jobService = Provider.of<JobService>(context, listen: false);
+
+    try {
+      if (authService.currentUser != null) {
+        // Get all jobs for this recruiter
+        final jobs = await jobService.fetchRecruiterJobs(authService.currentUser!.id);
+
+        // Extract job IDs
+        final jobIds = jobs.map((job) => job.id).toList();
+
+        if (jobIds.isNotEmpty) {
+          // Count applications for these jobs
+          final supabaseClient = AppConfig().supabaseClient;
+
+          // Query for total applications count
+          final applicationsResponse = await supabaseClient
+              .from('applications')
+              .select('application_id')
+              .in_('job_id', jobIds);
+
+          // Query for ranked applications count
+          final rankingsResponse = await supabaseClient
+              .from('cv_rankings')
+              .select('id')
+              .in_('job_id', jobIds);
+
+          if (mounted) {
+            setState(() {
+              _totalApplications = applicationsResponse.length;
+              _rankedApplications = rankingsResponse.length;
+              _isLoadingCounts = false;
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _totalApplications = 0;
+              _rankedApplications = 0;
+              _isLoadingCounts = false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading application counts: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingCounts = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -192,173 +236,306 @@ class _DashboardTab extends StatelessWidget {
     // Calculate dashboard stats
     final activeJobs = jobs.where((job) => job.status == 'Open').length;
     final closedJobs = jobs.where((job) => job.status == 'Closed').length;
-    final totalApplications = 0; // This would require additional API call
-    final rankedApplications = 0; // This would require additional API call
 
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 16),
-          Text(
-            'Dashboard',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Stats cards
-          Row(
+    return RefreshIndicator(
+      onRefresh: () async {
+        // Refresh job data
+        final authService = Provider.of<AuthService>(context, listen: false);
+        if (authService.currentUser != null) {
+          await jobService.fetchRecruiterJobs(authService.currentUser!.id);
+          await _loadApplicationCounts();
+        }
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: _StatCard(
-                  icon: Icons.work,
-                  title: 'Active Jobs',
-                  value: activeJobs.toString(),
-                  color: Colors.blue,
+              const SizedBox(height: 16),
+              Text(
+                'Dashboard',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _StatCard(
-                  icon: Icons.assignment_turned_in,
-                  title: 'Closed Jobs',
-                  value: closedJobs.toString(),
-                  color: Colors.orange,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  icon: Icons.people,
-                  title: 'Applications',
-                  value: totalApplications.toString(),
-                  color: Colors.green,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _StatCard(
-                  icon: Icons.auto_awesome,
-                  title: 'AI Ranked',
-                  value: rankedApplications.toString(),
-                  color: Colors.purple,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-          // Add "Manage Jobs" button
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const RecruiterJobsScreen(),
-                ),
-              );
-            },
-            icon: const Icon(Icons.work_outline),
-            label: const Text('Manage Job Postings'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 50),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Recent activity section
-          Text(
-            'Recent Jobs',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          Expanded(
-            child: jobService.isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : jobs.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // Stats cards
+              Row(
                 children: [
-                  const Icon(
-                    Icons.work_outline,
-                    size: 64,
-                    color: Colors.grey,
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.work,
+                      title: 'Active Jobs',
+                      value: activeJobs.toString(),
+                      color: Colors.blue,
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No jobs posted yet',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create your first job posting',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const CreateJobScreen(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Job Posting'),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.assignment_turned_in,
+                      title: 'Closed Jobs',
+                      value: closedJobs.toString(),
+                      color: Colors.orange,
+                    ),
                   ),
                 ],
               ),
-            )
-                : ListView.builder(
-              itemCount: jobs.length > 5 ? 5 : jobs.length, // Show only 5 most recent
-              itemBuilder: (context, index) {
-                final job = jobs[index];
-                return ListTile(
-                  title: Text(job.jobTitle),
-                  subtitle: Text(
-                    '${job.jobType} • ${job.datePosted != null ? DateFormat('MMM dd, yyyy').format(job.datePosted!) : 'N/A'}',
-                  ),
-                  trailing: Chip(
-                    label: Text(job.status),
-                    backgroundColor: job.status == 'Open'
-                        ? Colors.green.withOpacity(0.1)
-                        : Colors.red.withOpacity(0.1),
-                    labelStyle: TextStyle(
-                      color: job.status == 'Open' ? Colors.green : Colors.red,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.people,
+                      title: 'Applications',
+                      value: _isLoadingCounts ? '...' : _totalApplications.toString(),
+                      color: Colors.green,
                     ),
                   ),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => JobDetailScreen(
-                          job: job,
-                          isRecruiter: true,
-                        ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.auto_awesome,
+                      title: 'AI Ranked',
+                      value: _isLoadingCounts ? '...' : _rankedApplications.toString(),
+                      color: Colors.purple,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Add "Manage Jobs" button
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RecruiterJobsScreen(),
+                    ),
+                  ).then((_) {
+                    // Refresh job data and application counts when returning
+                    if (authService.currentUser != null) {
+                      jobService.fetchRecruiterJobs(authService.currentUser!.id);
+                      _loadApplicationCounts();
+                    }
+                  });
+                },
+                icon: const Icon(Icons.work_outline),
+                label: const Text('Manage Job Postings'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Recent activity section
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Recent Jobs',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  // View All button for jobs
+                  if (jobs.length > 5)
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const RecruiterJobsScreen(),
+                          ),
+                        ).then((_) {
+                          if (authService.currentUser != null) {
+                            jobService.fetchRecruiterJobs(authService.currentUser!.id);
+                            _loadApplicationCounts();
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.arrow_forward, size: 18),
+                      label: const Text('View All'),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                    );
-                  },
-                );
-              },
-            ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Recent jobs list
+              jobService.isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : jobs.isEmpty
+                  ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.work_outline,
+                      size: 64,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No jobs posted yet',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Create your first job posting',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const CreateJobScreen(),
+                          ),
+                        ).then((_) {
+                          // Refresh data when returning
+                          if (authService.currentUser != null) {
+                            jobService.fetchRecruiterJobs(authService.currentUser!.id);
+                            _loadApplicationCounts();
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Job Posting'),
+                    ),
+                  ],
+                ),
+              )
+                  : Column(
+                children: jobs.take(jobs.length > 5 ? 5 : jobs.length).map((job) {
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8.0),
+                    child: ListTile(
+                      title: Text(
+                        job.jobTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${job.jobType} • ${job.datePosted != null ? DateFormat('MMM dd, yyyy').format(job.datePosted!) : 'N/A'}',
+                          ),
+                          const SizedBox(height: 4),
+                          FutureBuilder<int>(
+                            future: _getApplicationCount(job.id!),
+                            builder: (context, snapshot) {
+                              final count = snapshot.data ?? 0;
+                              return Text(
+                                '$count application(s)',
+                                style: TextStyle(
+                                  color: count > 0 ? Colors.green : Colors.grey,
+                                  fontWeight: count > 0 ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Chip(
+                            label: Text(job.status),
+                            backgroundColor: job.status == 'Open'
+                                ? Colors.green.withOpacity(0.1)
+                                : Colors.red.withOpacity(0.1),
+                            labelStyle: TextStyle(
+                              color: job.status == 'Open' ? Colors.green : Colors.red,
+                              fontSize: 12,
+                            ),
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => JobDetailScreen(
+                              job: job,
+                              isRecruiter: true,
+                            ),
+                          ),
+                        ).then((_) {
+                          // Refresh data when returning
+                          _loadApplicationCounts();
+                        });
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+
+              // Show "See More Jobs" button if there are more than 5 jobs
+              if (jobs.length > 5)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16.0, bottom: 32.0),
+                  child: Center(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const RecruiterJobsScreen(),
+                          ),
+                        ).then((_) {
+                          if (authService.currentUser != null) {
+                            jobService.fetchRecruiterJobs(authService.currentUser!.id);
+                            _loadApplicationCounts();
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.visibility),
+                      label: const Text('See All Jobs'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey.shade200,
+                        foregroundColor: Colors.black87,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  // Helper method to get application count for a specific job
+  Future<int> _getApplicationCount(int jobId) async {
+    try {
+      final supabaseClient = AppConfig().supabaseClient;
+      final response = await supabaseClient
+          .from('applications')
+          .select('application_id')
+          .eq('job_id', jobId);
+
+      return response.length;
+    } catch (e) {
+      debugPrint('Error fetching application count for job $jobId: $e');
+      return 0;
+    }
   }
 }
 
@@ -671,6 +848,8 @@ class _CandidatesTabState extends State<_CandidatesTab> {
       }
     });
   }
+
+
 
   // Update this method in your _CandidatesTabState class
   Future<void> _loadApplications(int jobId) async {
@@ -1146,39 +1325,138 @@ class _CandidatesTabState extends State<_CandidatesTab> {
   }
 
 // Add these helper methods to your class
-  void _viewResume(String applicantId) {
+  Future<void> _viewResume(String applicantId) async {
     final supabaseService = SupabaseService();
 
+    // Show loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
-    supabaseService.getUserResume(applicantId).then((resumeData) {
-      Navigator.pop(context); // Close loading
+    try {
+      // Get the jobseeker profile to find the CV URL
+      final profileData = await supabaseService.getJobseekerProfile(applicantId);
 
-      if (resumeData == null || resumeData['file_url'] == null) {
+      // Close loading dialog
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Check if profile and CV exists
+      if (profileData == null || profileData['cv'] == null || profileData['cv'].toString().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No resume found for this applicant'),
+            content: Text('No CV found for this applicant'),
             backgroundColor: Colors.orange,
           ),
         );
         return;
       }
 
-      _launchURL(context, resumeData['file_url']);
-    }).catchError((error) {
-      Navigator.pop(context); // Close loading
+      final cvUrl = profileData['cv'].toString();
+      debugPrint('Found CV URL: $cvUrl');
+
+      // Extract filename from the URL
+      String filename = cvUrl.split('/').last;
+      if (filename.isEmpty) {
+        filename = 'applicant_cv.pdf';
+      }
+
+      // Show download progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Downloading CV'),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Downloading CV file...'),
+            ],
+          ),
+        ),
+      );
+
+      // Download the file
+      try {
+        // If this is a Supabase storage URL
+        if (cvUrl.contains('storage.googleapis.com') || cvUrl.contains('supabase')) {
+          // Get file data directly from Supabase
+          final http.Response response = await http.get(Uri.parse(cvUrl));
+
+          if (response.statusCode != 200) {
+            throw Exception('Failed to download file: ${response.statusCode}');
+          }
+
+          // Get temporary directory
+          final directory = await getTemporaryDirectory();
+          final filePath = '${directory.path}/$filename';
+
+          // Write to a temporary file
+          final file = File(filePath);
+          await file.writeAsBytes(response.bodyBytes);
+
+          // Close download dialog
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+
+          // Share the file
+          await Share.shareXFiles(
+            [XFile(filePath)],
+            subject: 'Applicant CV',
+            text: 'Applicant CV: $filename',
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('CV downloaded successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          // For external URLs or URLs that don't point directly to Supabase storage
+          await _launchURL(context, cvUrl);
+
+          // Close download dialog
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        }
+      } catch (e) {
+        // Close download dialog if open
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        debugPrint('Error downloading CV: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error downloading CV: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Error fetching profile or CV: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error accessing resume: $error'),
+          content: Text('Error accessing CV: $e'),
           backgroundColor: Colors.red,
         ),
       );
-    });
+    }
   }
+
 
   void _viewProfile(UserModel user) {
     final supabaseService = SupabaseService();
@@ -1666,10 +1944,11 @@ class ApplicationCardState extends State<ApplicationCard> {
                     children: [
                       // View CV button
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.description, size: 16),
-                        label: const Text('View CV'),
-                        onPressed: () => _viewApplicantResume(context, widget.application.applicantId),
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Download CV'),
+                        onPressed: () => downloadAndSaveCV(context, widget.application.applicantId),
                       ),
+
                       const SizedBox(width: 8),
 
                       // View Profile button
@@ -2702,141 +2981,578 @@ class ApplicationCardState extends State<ApplicationCard> {
   }
 }
 
+// Add this method directly inside your ApplicationCardState class or wherever your CV viewing code is
+// Updated method to download and save the CV without sharing
+Future<void> downloadAndSaveCV(BuildContext context, String applicantId) async {
+  final supabaseService = SupabaseService();
+
+  // Show loading indicator
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => const AlertDialog(
+      title: Text('Accessing CV'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Locating CV file...'),
+        ],
+      ),
+    ),
+  );
+
+  try {
+    // Get the jobseeker profile to find the CV URL
+    final profileData = await supabaseService.getJobseekerProfileData(applicantId);
+
+    // Close the loading dialog
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+
+    // Check if profile and CV exists
+    if (profileData == null || profileData['cv'] == null || profileData['cv'].toString().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No CV found for this applicant'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final cvUrl = profileData['cv'].toString();
+    debugPrint('Found CV URL: $cvUrl');
+
+    // Extract filename from the URL
+    String filename = cvUrl.split('/').last;
+    if (filename.isEmpty || !filename.contains('.')) {
+      // If filename is invalid or has no extension, use a default name with timestamp
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      filename = 'applicant_cv_$timestamp.pdf';
+    }
+
+    // Show download progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        title: Text('Downloading'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Downloading CV file...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Get the response from the URL
+      final response = await http.get(Uri.parse(cvUrl));
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download file: HTTP ${response.statusCode}');
+      }
+
+      // Determine where to save the file
+      final filePath = await _getSaveLocation(filename);
+
+      if (filePath == null) {
+        // User canceled or directory selection failed
+        // Close download dialog
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Download canceled'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Write to the file
+      final file = File(filePath);
+      await file.writeAsBytes(response.bodyBytes);
+
+      // Close download dialog
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show success dialog with file path
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Download Complete'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('CV has been downloaded successfully.'),
+              const SizedBox(height: 8),
+              const Text('File saved to:'),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  filePath,
+                  style: const TextStyle(fontWeight: FontWeight.bold, color:Colors.black),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+            // Option to share the file
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Share.shareXFiles([XFile(filePath)], text: 'Applicant CV: $filename');
+              },
+              child: const Text('Share'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Close download dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Error downloading CV: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error downloading CV: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  } catch (e) {
+    // Close loading dialog if still showing
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+
+    debugPrint('Error fetching profile or CV: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error accessing CV: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
+// Helper method to get the save location
+Future<String?> _getSaveLocation(String filename) async {
+  try {
+    // For Android and iOS, use the downloads directory
+    final directory = await _getDownloadsDirectory();
+
+    if (directory != null) {
+      // Create a unique filename if one already exists
+      final baseFilename = filename.contains('.')
+          ? filename.substring(0, filename.lastIndexOf('.'))
+          : filename;
+      final extension = filename.contains('.')
+          ? filename.substring(filename.lastIndexOf('.'))
+          : '.pdf';
+
+      String uniqueFilename = filename;
+      int counter = 1;
+
+      while (await File('${directory.path}/$uniqueFilename').exists()) {
+        uniqueFilename = '${baseFilename}_$counter$extension';
+        counter++;
+      }
+
+      return '${directory.path}/$uniqueFilename';
+    }
+    return null;
+  } catch (e) {
+    debugPrint('Error getting save location: $e');
+    return null;
+  }
+}
+
+// Helper to get downloads directory based on platform
+Future<Directory?> _getDownloadsDirectory() async {
+  try {
+    if (Platform.isAndroid) {
+      // For Android, use the Downloads directory
+      final directory = Directory('/storage/emulated/0/Download');
+      if (await directory.exists()) {
+        return directory;
+      }
+
+      // Fallback to external storage directory
+      final externalDir = await getExternalStorageDirectory();
+      return externalDir;
+    } else if (Platform.isIOS) {
+      // For iOS, use the Documents directory
+      final directory = await getApplicationDocumentsDirectory();
+      return directory;
+    } else {
+      // For other platforms, use temp directory
+      final directory = await getTemporaryDirectory();
+      return directory;
+    }
+  } catch (e) {
+    debugPrint('Error getting downloads directory: $e');
+    // Fallback to temp directory
+    return await getTemporaryDirectory();
+  }
+}
+
 // Profile Tab
-class _ProfileTab extends StatelessWidget {
+class _ProfileTab extends StatefulWidget {
   const _ProfileTab();
+
+  @override
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<_ProfileTab> {
+  @override
+  void initState() {
+    super.initState();
+    // Load recruiter profile when tab loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadRecruiterProfile();
+    });
+  }
+
+  Future<void> _loadRecruiterProfile() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    if (authService.currentUser != null) {
+      final recruiterProfileService = Provider.of<RecruiterProfileService>(context, listen: false);
+      await recruiterProfileService.fetchProfile(authService.currentUser!.id);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
+    final recruiterProfileService = Provider.of<RecruiterProfileService>(context);
     final user = authService.currentUser;
+    final recruiterProfile = recruiterProfileService.recruiterProfile;
 
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 24),
+    // Check if recruiter has company profile info
+    final hasCompanyProfile = recruiterProfile != null &&
+        (recruiterProfile.companyName?.isNotEmpty ?? false);
 
-          // Profile avatar
-          CircleAvatar(
-            radius: 60,
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            child: Text(
-              user?.name.isNotEmpty == true
-                  ? user!.name.substring(0, 1).toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                fontSize: 40,
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const SizedBox(height: 16), // Reduced top padding
+
+            // Profile avatar or company logo
+            if (hasCompanyProfile && recruiterProfile!.logoUrl != null)
+              Container(
+                width: 100, // Reduced size
+                height: 100, // Reduced size
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.network(
+                    recruiterProfile!.logoUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => CircleAvatar(
+                      radius: 50, // Reduced size
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child: Text(
+                        user?.name.isNotEmpty == true
+                            ? user!.name.substring(0, 1).toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else
+              CircleAvatar(
+                radius: 50, // Reduced size
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                child: Text(
+                  user?.name.isNotEmpty == true
+                      ? user!.name.substring(0, 1).toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12), // Reduced spacing
+
+            // Company name (if available) or User name
+            Text(
+              hasCompanyProfile
+                  ? recruiterProfile!.companyName!
+                  : (user?.name ?? 'Recruiter'),
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6), // Reduced spacing
+
+            // User's name if showing company profile
+            if (hasCompanyProfile && user?.name != null)
+              Text(
+                'Account: ${user!.name}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.grey.shade700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+
+            // User email
+            Text(
+              user?.email ?? 'email@example.com',
+              style: const TextStyle(color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+
+            // Industry and location if available
+            if (hasCompanyProfile) ...[
+              const SizedBox(height: 6), // Reduced spacing
+              if (recruiterProfile!.industry != null && recruiterProfile.industry!.isNotEmpty)
+                Chip(
+                  label: Text(
+                    recruiterProfile.industry!,
+                    style: const TextStyle(fontSize: 12), // Smaller text
+                  ),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  side: BorderSide.none,
+                ),
+              if (recruiterProfile.location != null && recruiterProfile.location!.isNotEmpty)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 14, // Smaller icon
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      recruiterProfile.location!,
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontSize: 12, // Smaller text
+                      ),
+                    ),
+                  ],
+                ),
+              if (recruiterProfile.website != null && recruiterProfile.website!.isNotEmpty)
+                InkWell(
+                  onTap: () {
+                    // You can add launch URL functionality here
+                  },
+                  child: Text(
+                    recruiterProfile.website!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      decoration: TextDecoration.underline,
+                      fontSize: 12, // Smaller text
+                    ),
+                  ),
+                ),
+            ],
+
+            const SizedBox(height: 16), // Reduced spacing
+
+            // Profile completion indicator if no company profile yet
+            if (!hasCompanyProfile)
+              Card(
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0), // Reduced padding
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.business_outlined,
+                        size: 32, // Smaller icon
+                        color: Colors.amber,
+                      ),
+                      const SizedBox(height: 4), // Reduced spacing
+                      Text(
+                        'Complete Your Company Profile',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 2), // Reduced spacing
+                      const Text(
+                        'Add company information to help job seekers find you',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      const SizedBox(height: 8), // Reduced spacing
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const EditRecruiterProfileScreen(),
+                            ),
+                          ).then((_) => _loadRecruiterProfile());
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ), // Smaller button
+                          textStyle: const TextStyle(fontSize: 12),
+                        ),
+                        child: const Text('Complete Profile'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 16), // Reduced spacing
+
+            // Profile options
+            Card(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    dense: true, // Compact list tile
+                    visualDensity: VisualDensity.compact,
+                    leading: const Icon(Icons.business, size: 20),
+                    title: const Text('Company Profile'),
+                    trailing: const Icon(Icons.chevron_right, size: 20),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const EditRecruiterProfileScreen(),
+                        ),
+                      ).then((_) => _loadRecruiterProfile());
+                    },
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    dense: true, // Compact list tile
+                    visualDensity: VisualDensity.compact,
+                    leading: const Icon(Icons.help_outline, size: 20),
+                    title: const Text('Help & Support'),
+                    trailing: const Icon(Icons.chevron_right, size: 20),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const HelpDeskScreen(isRecruiter: true),
+                        ),
+                      );
+                    },
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    dense: true, // Compact list tile
+                    visualDensity: VisualDensity.compact,
+                    leading: const Icon(Icons.work_outline, size: 20),
+                    title: const Text('Manage Job Postings'),
+                    trailing: const Icon(Icons.chevron_right, size: 20),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RecruiterJobsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
-          ),
-          const SizedBox(height: 16),
 
-          // User name
-          Text(
-            user?.name ?? 'Recruiter',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 4),
+            const SizedBox(height: 24),
 
-          // User email
-          Text(
-            user?.email ?? 'email@example.com',
-            style: const TextStyle(color: Colors.grey),
-          ),
-          const SizedBox(height: 32),
-
-          // Profile options
-          Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.business),
-                  title: const Text('Company Profile'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // Navigate to company profile
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.person_outline),
-                  title: const Text('Account Settings'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // Navigate to account settings
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.settings_outlined),
-                  title: const Text('Settings'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const SettingsScreen(isRecruiter: true),
+            // Logout button
+            ElevatedButton.icon(
+              onPressed: () async {
+                // Show confirmation dialog
+                final shouldLogout = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Logout'),
+                    content: const Text('Are you sure you want to log out?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
                       ),
-                    );
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.help_outline),
-                  title: const Text('Help & Support'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const HelpDeskScreen(isRecruiter: true),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Logout'),
                       ),
-                    );
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.work_outline),
-                  title: const Text('Manage Job Postings'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const RecruiterJobsScreen(),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
-
-          // Logout button
-          ElevatedButton.icon(
-            onPressed: () async {
-              await authService.logout();
-              if (context.mounted) {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    ],
+                  ),
                 );
-              }
-            },
-            icon: const Icon(Icons.logout),
-            label: const Text('Log Out'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 50),
+
+                if (shouldLogout == true) {
+                  await authService.logout();
+                  if (context.mounted) {
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text('Log Out'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 48), // Reduced height
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
@@ -2894,4 +3610,6 @@ class _StatCard extends StatelessWidget {
       ),
     );
   }
+  // Add this to your NotificationService class or somewhere appropriate
+
 }

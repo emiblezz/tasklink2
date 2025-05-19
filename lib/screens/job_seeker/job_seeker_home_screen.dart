@@ -411,272 +411,452 @@ class _ApplicationsTabState extends State<_ApplicationsTab> {
     }
   }
 
-  // In the Applications tab in JobSeekerHomeScreen.dart
+  void _showFeedbackDialog(BuildContext context, String feedback) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.feedback_outlined, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Recruiter Feedback'),
+          ],
+        ),
+        content: Container(
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: SingleChildScrollView(
+            child: Text(
+              feedback,
+              style: const TextStyle(fontSize: 16),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final jobService = Provider.of<JobService>(context);
     final applications = jobService.applications;
 
-    return jobService.isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : applications.isEmpty
-        ? Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.assignment_outlined,
-            size: 64,
-            color: Colors.grey,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No Applications Yet',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'You haven\'t applied to any jobs yet',
-            style: TextStyle(color: Colors.grey),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () {
-              // Switch to Jobs tab
-              (context.findAncestorStateOfType<_JobSeekerHomeScreenState>())
-                  ?.setState(() {
-                (context.findAncestorStateOfType<_JobSeekerHomeScreenState>())
-                    ?._selectedIndex = 0;
-              });
-            },
-            child: const Text('Browse Jobs'),
-          ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Applications'),
+        actions: [
+          // Add clear button if there are applications
+          if (applications.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.clear_all),
+              tooltip: 'Clear all applications',
+              onPressed: () {
+                _showClearConfirmDialog(context, jobService);
+              },
+            ),
         ],
       ),
-    )
-        : RefreshIndicator(
-      onRefresh: _loadApplications,
-      child: ListView.builder(
-        itemCount: applications.length,
-        itemBuilder: (context, index) {
-          final application = applications[index];
-          // We need to fetch the job details for each application
-          return FutureBuilder<JobModel?>(
-            future: jobService.getJobById(application.jobId),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Card(
-                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    title: Text('Loading...'),
-                    subtitle: LinearProgressIndicator(),
-                  ),
-                );
-              }
+      body: jobService.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : applications.isEmpty
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.assignment_outlined,
+              size: 64,
+              color: Colors.grey,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No Applications Yet',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'You haven\'t applied to any jobs yet',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                // Switch to Jobs tab
+                (context.findAncestorStateOfType<_JobSeekerHomeScreenState>())
+                    ?.setState(() {
+                  (context.findAncestorStateOfType<_JobSeekerHomeScreenState>())
+                      ?._selectedIndex = 0;
+                });
+              },
+              child: const Text('Browse Jobs'),
+            ),
+          ],
+        ),
+      )
+          : RefreshIndicator(
+        onRefresh: _loadApplications,
+        child: ListView.builder(
+          itemCount: applications.length,
+          itemBuilder: (context, index) {
+            final application = applications[index];
+            // Check if this application has feedback
+            final hasFeedback = application.recruiterFeedback != null &&
+                application.recruiterFeedback!.isNotEmpty;
 
-              if (snapshot.hasError || !snapshot.hasData) {
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    title: const Text('Error loading job details'),
-                    subtitle: const Text('Job may have been removed'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () async {
-                        // Allow deleting applications for removed jobs
-                        final confirmed = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Remove Application'),
-                            content: const Text('Remove this application from your list?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Remove'),
-                              ),
-                            ],
+            // We need to fetch the job details for each application
+            return FutureBuilder<JobModel?>(
+              future: jobService.getJobById(application.jobId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Card(
+                    margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: ListTile(
+                      title: Text('Loading...'),
+                      subtitle: LinearProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (snapshot.hasError || !snapshot.hasData) {
+                  return Dismissible(
+                    key: Key('application-${application.id}'),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20.0),
+                      color: Colors.red,
+                      child: const Icon(
+                        Icons.delete,
+                        color: Colors.white,
+                      ),
+                    ),
+                    confirmDismiss: (direction) async {
+                      return await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Remove Application'),
+                          content: const Text('Remove this application from your list?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Remove'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    onDismissed: (direction) async {
+                      if (application.id != null) {
+                        await jobService.deleteApplication(application.id!);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Application removed'),
+                            backgroundColor: Colors.red,
                           ),
-                        ) ?? false;
+                        );
+                      }
+                    },
+                    child: Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: ListTile(
+                        title: const Text('Error loading job details'),
+                        subtitle: const Text('Job may have been removed'),
+                      ),
+                    ),
+                  );
+                }
 
-                        if (confirmed && application.id != null) {
-                          await jobService.deleteApplication(application.id!);
-                          _loadApplications();
-                        }
-                      },
+                final job = snapshot.data!;
+
+                return Dismissible(
+                  key: Key('application-${application.id}'),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20.0),
+                    color: Colors.red,
+                    child: const Icon(
+                      Icons.delete,
+                      color: Colors.white,
                     ),
                   ),
-                );
-              }
-
-              final job = snapshot.data!;
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: InkWell(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => JobDetailScreen(job: job),
+                  confirmDismiss: (direction) async {
+                    return await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Remove Application'),
+                        content: const Text('Remove this application from your list?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Remove'),
+                          ),
+                        ],
                       ),
                     );
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  onDismissed: (direction) async {
+                    if (application.id != null) {
+                      await jobService.deleteApplication(application.id!);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Application removed'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  },
+                  child: Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Stack(
                       children: [
-                        // Title and status row
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Company logo
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(8),
+                        // Main card content - always navigates to job details
+                        InkWell(
+                          onTap: () {
+                            // Always navigate to job details when tapping the main card
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => JobDetailScreen(job: job),
                               ),
-                              child: job.companyLogo != null && job.companyLogo!.isNotEmpty
-                                  ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  job.companyLogo!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => const Icon(
-                                    Icons.business,
-                                    size: 24,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              )
-                                  : const Icon(
-                                Icons.business,
-                                size: 24,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Title and status row
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Company logo
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade200,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: job.companyLogo != null && job.companyLogo!.isNotEmpty
+                                          ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          job.companyLogo!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => const Icon(
+                                            Icons.business,
+                                            size: 24,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      )
+                                          : const Icon(
+                                        Icons.business,
+                                        size: 24,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
 
-                            // Job title and company
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    job.jobTitle,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
+                                    // Job title and company
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            job.jobTitle,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            job.companyName,
+                                            style: TextStyle(
+                                              color: Colors.grey.shade700,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    job.companyName,
-                                    style: TextStyle(
-                                      color: Colors.grey.shade700,
-                                      fontSize: 14,
+
+                                    // Application status
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        application.applicationStatus,
+                                        style: TextStyle(
+                                          color: _getStatusColor(application.applicationStatus),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+
+                                // Application date
+                                Row(
+                                  children: [
+                                    const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Applied: ${DateFormat('MMM dd, yyyy').format(application.dateApplied ?? DateTime.now())}',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                // Add space where the feedback indicator will be
+                                if (hasFeedback) ...[
+                                  const SizedBox(height: 12),
+                                  const Divider(height: 1),
+                                  const SizedBox(height: 38), // Space for the feedback indicator
                                 ],
-                              ),
+                              ],
                             ),
+                          ),
+                        ),
 
-                            // Application status
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                application.applicationStatus,
-                                style: TextStyle(
-                                  color: _getStatusColor(application.applicationStatus),
-                                  fontWeight: FontWeight.bold,
+                        // Feedback indicator at the bottom of the card - separate tappable area
+                        if (hasFeedback)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  // Only show feedback dialog when tapping this specific area
+                                  _showFeedbackDialog(context, application.recruiterFeedback!);
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0, top: 8.0),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.feedback_outlined,
+                                        size: 16,
+                                        color: Colors.blue,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Tap to view recruiter feedback',
+                                          style: TextStyle(
+                                            color: Colors.blue,
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                      const Icon(
+                                        Icons.arrow_forward_ios,
+                                        size: 14,
+                                        color: Colors.blue,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Application date
-                        Row(
-                          children: [
-                            const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Applied: ${DateFormat('MMM dd, yyyy').format(application.dateApplied ?? DateTime.now())}',
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        // Add recruiter feedback section if available
-                        if (application.recruiterFeedback != null &&
-                            application.recruiterFeedback!.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          const Divider(),
-                          const SizedBox(height: 8),
-
-                          // Feedback header
-                          Row(
-                            children: [
-                              const Icon(Icons.feedback_outlined,
-                                  size: 16,
-                                  color: Colors.blue),
-                              const SizedBox(width: 4),
-                              const Text(
-                                'Recruiter Feedback',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
                           ),
-                          const SizedBox(height: 8),
-
-                          // Feedback content
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade700,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.shade100),
-                            ),
-                            child: Text(
-                              application.recruiterFeedback!,
-                              style: const TextStyle(
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
-                ),
-              );
-            },
-          );
-        },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
 
+  // Add this method to handle clearing all applications
+  void _showClearConfirmDialog(BuildContext context, JobService jobService) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear All Applications'),
+        content: const Text('Are you sure you want to remove all applications? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              // Show loading indicator
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const AlertDialog(
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Clearing applications...'),
+                    ],
+                  ),
+                ),
+              );
+
+              // Clear all applications
+              await jobService.clearAllApplications();
+
+              // Close loading dialog and refresh
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('All applications cleared'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+
+              // Refresh the list
+              _loadApplications();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Color _getStatusColor(String status) {
     switch (status) {
@@ -776,21 +956,6 @@ class _ProfileTab extends StatelessWidget {
                   title: const Text('Edit Profile'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const EditProfileScreen(),
-                      ),
-                    );
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.description_outlined),
-                  title: const Text('My CV'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // Open CV viewer or upload flow
                     Navigator.push(
                       context,
                       MaterialPageRoute(

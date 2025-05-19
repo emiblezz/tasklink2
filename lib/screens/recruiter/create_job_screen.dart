@@ -8,6 +8,9 @@ import 'package:tasklink2/utils/constants.dart';
 import 'package:tasklink2/utils/validators.dart';
 import 'package:tasklink2/services/image_picker_service.dart';
 
+import '../../config/app_config.dart';
+import '../../services/notification_service.dart';
+
 class CreateJobScreen extends StatefulWidget {
   final JobModel? job; // Null for new job, non-null for editing
 
@@ -149,7 +152,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         );
         return;
       }
-
       // Format salary as string with currency
       String? formattedSalary;
       if (_salaryController.text.isNotEmpty) {
@@ -231,6 +233,30 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         } else {
           // Create new job
           await jobService.createJob(job);
+
+          // AFTER successful job creation, send notifications to relevant job seekers
+          if (mounted && skills != null && skills.isNotEmpty) {
+            try {
+              final notificationService = Provider.of<NotificationService>(context, listen: false);
+
+              // Find job seekers with matching skills
+              final relevantJobSeekers = await _findRelevantJobSeekers(skills);
+
+              if (relevantJobSeekers.isNotEmpty) {
+                await notificationService.notifyNewJob(
+                  jobSeekerIds: relevantJobSeekers,
+                  jobTitle: _titleController.text,
+                  companyName: _companyNameController.text,
+                  jobId: null, // We don't have the job ID here, so pass null
+                );
+                debugPrint('Job notifications sent to ${relevantJobSeekers.length} job seekers');
+              }
+            } catch (e) {
+              debugPrint('Failed to send job notifications: $e');
+              // Don't show this error to the user since the job was created successfully
+            }
+          }
+
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -252,6 +278,40 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         }
       }
     }
+  }
+
+// Helper method to find job seekers with matching skills
+  Future<List<String>> _findRelevantJobSeekers(List<String> jobSkills) async {
+    final List<String> relevantUserIds = [];
+
+    try {
+      final supabase = AppConfig().supabaseClient;
+
+      // For each skill, find users with that skill
+      for (final skill in jobSkills) {
+        final response = await supabase
+            .from('jobseeker_profiles')
+            .select('user_id')
+            .ilike('skills', '%$skill%')
+            .limit(20); // Limit to a reasonable number
+
+        if (response != null && response is List && response.isNotEmpty) {
+          for (var profile in response) {
+            final userId = profile['user_id'].toString();
+            // Only add unique user IDs
+            if (!relevantUserIds.contains(userId)) {
+              relevantUserIds.add(userId);
+            }
+          }
+        }
+      }
+
+      debugPrint('Found ${relevantUserIds.length} relevant job seekers for skills: $jobSkills');
+    } catch (e) {
+      debugPrint('Error finding relevant job seekers: $e');
+    }
+
+    return relevantUserIds;
   }
 
   Widget _buildLogoSelector() {

@@ -2,306 +2,389 @@ import 'package:flutter/material.dart';
 import 'package:supabase/supabase.dart';
 import 'package:tasklink2/services/ai_services.dart';
 
-
-
-// This class is no longer extending ChangeNotifier
 class RankingService {
-  final SupabaseClient _supabaseClient;
-  final AIService _aiService;
+final SupabaseClient _supabaseClient;
+final AIService _aiService;
 
-  RankingService({
-    required SupabaseClient supabaseClient,
-    required AIService aiService,
-  })  : _supabaseClient = supabaseClient,
-        _aiService = aiService;
+RankingService({
+required SupabaseClient supabaseClient,
+required AIService aiService,
+})  : _supabaseClient = supabaseClient,
+_aiService = aiService;
 
-  // Get resume text for an applicant
-  // Updated getResumeText for RankingService
-  // Updated getResumeText for RankingService
-  Future<String?> getResumeText(String applicantId) async {
-    try {
-      final response = await _supabaseClient
-          .from('resumes')
-          .select('text')
-          .eq('applicant_id', applicantId)
-          .order('uploaded_date', ascending: false)
-          .limit(1);
+// Get resume text for an applicant
+Future<String?> getResumeText(String applicantId) async {
+try {
+final response = await _supabaseClient
+    .from('resumes')
+    .select('text')
+    .eq('applicant_id', applicantId)
+    .order('uploaded_date', ascending: false)
+    .limit(1);
 
-      if (response != null && response.isNotEmpty) {
-        return response[0]['text'] as String?;
-      }
-      return "Sample resume text";
-    } catch (e) {
-      debugPrint('Error fetching resume text: $e');
-      return "Sample resume text";
-    }
-  }
-  // Add this method to RankingService class
-  Future<List<Map<String, dynamic>>> _getApplicationsForJob(String jobId) async {
-    try {
-      debugPrint('Getting applications for job ID: $jobId');
+if (response != null && response.isNotEmpty) {
+return response[0]['text'] as String?;
+}
 
-      // Simple approach - just get applications without trying to join with profiles
-      final response = await _supabaseClient
-          .from('applications')
-          .select('*')
-          .eq('job_id', int.tryParse(jobId) ?? jobId);
+// Check jobseeker_profiles table as fallback
+final profileResponse = await _supabaseClient
+    .from('jobseeker_profiles')
+    .select('cv_text')
+    .eq('user_id', applicantId)
+    .maybeSingle();
 
-      final applications = List<Map<String, dynamic>>.from(response);
-      debugPrint('Found ${applications.length} applications');
+if (profileResponse != null && profileResponse['cv_text'] != null) {
+return profileResponse['cv_text'] as String?;
+}
 
-      // For each application, manually fetch the applicant profile
-      List<Map<String, dynamic>> enrichedApplications = [];
+debugPrint('No resume text found for applicant ID: $applicantId');
+return null;
+} catch (e) {
+debugPrint('Error fetching resume text: $e');
+return null;
+}
+}
 
-      for (final app in applications) {
-        try {
-          // Try to get profile info from profiles table
-          final applicantId = app['applicant_id'];
-          if (applicantId != null) {
-            final profileResponse = await _supabaseClient
-                .from('profiles')
-                .select('*')
-                .eq('id', applicantId)
-                .maybeSingle();
+Future<List<Map<String, dynamic>>> _getApplicationsForJob(String jobId) async {
+try {
+debugPrint('Getting applications for job ID: $jobId');
 
-            if (profileResponse != null) {
-              // Add profile info to application data
-              app['applicant'] = profileResponse;
-            } else {
-              // If profile not found by id, try with user_id
-              final profileByUserIdResponse = await _supabaseClient
-                  .from('profiles')
-                  .select('*')
-                  .eq('user_id', applicantId)
-                  .maybeSingle();
+// Get applications without joining
+final response = await _supabaseClient
+    .from('applications')
+    .select('*')
+    .eq('job_id', int.tryParse(jobId) ?? jobId);
 
-              if (profileByUserIdResponse != null) {
-                app['applicant'] = profileByUserIdResponse;
-              } else {
-                // Create basic applicant info if not found
-                app['applicant'] = {'name': 'Applicant $applicantId', 'email': 'N/A'};
-              }
-            }
-          }
-        } catch (e) {
-          debugPrint('Error fetching profile for application: $e');
-          // Create basic applicant info to avoid null errors
-          app['applicant'] = {'name': 'Unknown Applicant', 'email': 'N/A'};
-        }
+final applications = List<Map<String, dynamic>>.from(response);
+debugPrint('Found ${applications.length} applications');
 
-        enrichedApplications.add(app);
-      }
+// Enrich with applicant information
+List<Map<String, dynamic>> enrichedApplications = [];
 
-      return enrichedApplications;
-    } catch (e) {
-      debugPrint('Error getting applications: $e');
-      return [];
-    }
-  }
+for (final app in applications) {
+try {
+final applicantId = app['applicant_id'];
+if (applicantId != null) {
+// Try to get user profile
+final userResponse = await _supabaseClient
+    .from('users')
+    .select('name, email')
+    .eq('user_id', applicantId)
+    .maybeSingle();
 
-  // Rank applications using backend AI service
-  // Updated rankApplications method in RankingService (not just AIService)
-  Future<List<Map<String, dynamic>>> rankApplications(String jobId, String jobDescription) async {
-    try {
-      // Get application data
-      final applications = await _getApplicationsForJob(jobId);
+if (userResponse != null) {
+app['applicant'] = {
+'name': userResponse['name'],
+'email': userResponse['email']
+};
+} else {
+// Fallback profile info
+app['applicant'] = {
+'name': 'Applicant ${applicantId.toString().substring(0, 8)}',
+'email': 'N/A'
+};
+}
+}
+} catch (e) {
+debugPrint('Error fetching profile for application: $e');
+app['applicant'] = {'name': 'Unknown Applicant', 'email': 'N/A'};
+}
 
-      if (applications.isEmpty) {
-        debugPrint('No applications found for job: $jobId');
-        return [];
-      }
+enrichedApplications.add(app);
+}
 
-      List<Map<String, dynamic>> rankedApplications = [];
+return enrichedApplications;
+} catch (e) {
+debugPrint('Error getting applications: $e');
+return [];
+}
+}
 
-      // Define technical and soft skills categories
-      final technicalSkills = [
-        'python', 'java', 'javascript', 'typescript', 'flutter', 'dart', 'react',
-        'angular', 'vue', 'node', 'express', 'django', 'flask', 'spring',
-        'html', 'css', 'sql', 'nosql', 'mongodb', 'postgresql', 'mysql',
-        'git', 'docker', 'kubernetes', 'aws', 'azure', 'gcp', 'firebase',
-        'mobile', 'web', 'frontend', 'backend', 'fullstack', 'devops',
-        'machine learning', 'data science', 'ai', 'cloud', 'blockchain'
-      ];
+// Improved rank applications method with better scoring logic
+Future<List<Map<String, dynamic>>> rankApplications(String jobId, String jobDescription) async {
+try {
+// Get application data
+final applications = await _getApplicationsForJob(jobId);
 
-      final softSkills = [
-        'communication', 'teamwork', 'leadership', 'problem-solving',
-        'analytical', 'creative', 'organized', 'detail-oriented',
-        'self-motivated', 'time management', 'project management'
-      ];
+if (applications.isEmpty) {
+debugPrint('No applications found for job: $jobId');
+return [];
+}
 
-      for (final app in applications) {
-        try {
-          // Get applicant info
-          final applicantId = app['applicant_id'] as String?;
-          if (applicantId == null) continue;
+List<Map<String, dynamic>> rankedApplications = [];
 
-          // Try to get resume text
-          String resumeText = 'Sample resume';
-          try {
-            final resumeResponse = await _supabaseClient
-                .from('resumes')
-                .select('text')
-                .eq('applicant_id', applicantId)
-                .maybeSingle();
+// Define enhanced skill categories with synonyms and related terms
+final technicalSkillsMap = {
+'programming': ['python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'ruby', 'php', 'coding', 'programming', 'development', 'software'],
+'web': ['html', 'css', 'javascript', 'web', 'frontend', 'react', 'angular', 'vue', 'node', 'express', 'responsive', 'spa'],
+'mobile': ['flutter', 'dart', 'react native', 'swift', 'kotlin', 'android', 'ios', 'mobile', 'app development'],
+'backend': ['django', 'flask', 'spring', 'node', 'express', 'backend', 'server', 'api', 'rest', 'graphql'],
+'database': ['sql', 'nosql', 'mongodb', 'postgresql', 'mysql', 'oracle', 'database', 'data modeling', 'schema'],
+'devops': ['git', 'docker', 'kubernetes', 'ci/cd', 'jenkins', 'github', 'gitlab', 'aws', 'azure', 'gcp', 'cloud', 'devops'],
+'ai': ['machine learning', 'data science', 'ai', 'deep learning', 'neural networks', 'nlp', 'computer vision', 'tensorflow', 'pytorch']
+};
 
-            if (resumeResponse != null && resumeResponse['text'] != null) {
-              resumeText = resumeResponse['text'];
-            }
-          } catch (e) {
-            debugPrint('Error getting resume for $applicantId: $e');
-          }
+final softSkillsMap = {
+'communication': ['communication', 'written', 'verbal', 'presentation', 'public speaking', 'documentation'],
+'teamwork': ['teamwork', 'collaboration', 'team player', 'cooperative', 'cross-functional'],
+'leadership': ['leadership', 'management', 'mentoring', 'supervision', 'team lead', 'project lead'],
+'problem-solving': ['problem-solving', 'analytical', 'critical thinking', 'debugging', 'troubleshooting', 'root cause analysis'],
+'time-management': ['time management', 'prioritization', 'deadline', 'scheduling', 'planning', 'organization'],
+'adaptability': ['adaptability', 'flexibility', 'learning', 'versatile', 'agile']
+};
 
-          // Extract keywords from job description
-          final jobKeywords = technicalSkills.where((skill) =>
-              jobDescription.toLowerCase().contains(skill)).toList();
+// Extract all skills into flat lists for easier checking
+final allTechnicalSkills = technicalSkillsMap.values.expand((i) => i).toList();
+final allSoftSkills = softSkillsMap.values.expand((i) => i).toList();
 
-          // Check matches in technical skills
-          final matchingTechSkills = jobKeywords.where((skill) =>
-              resumeText.toLowerCase().contains(skill)).toList();
+// Analyze job description first to determine job type and required skills
+final jobCategoryCounts = <String, int>{};
+int totalTechSkillsInJob = 0;
 
-          // Check matches in soft skills
-          final matchingSoftSkills = softSkills.where((skill) =>
-              resumeText.toLowerCase().contains(skill)).toList();
+// Count occurrences of skill categories in job description
+final jobDescLower = jobDescription.toLowerCase();
+technicalSkillsMap.forEach((category, skills) {
+int count = 0;
+for (final skill in skills) {
+if (jobDescLower.contains(skill)) {
+count++;
+totalTechSkillsInJob++;
+}
+}
+if (count > 0) {
+jobCategoryCounts[category] = count;
+}
+});
 
-          // Missing technical skills
-          final missingSkills = jobKeywords.where((skill) =>
-          !resumeText.toLowerCase().contains(skill)).toList();
+// Create weighted category importance based on job description
+final categoryWeights = <String, double>{};
+jobCategoryCounts.forEach((category, count) {
+categoryWeights[category] = totalTechSkillsInJob > 0 ? count / totalTechSkillsInJob : 0;
+});
 
-          // Calculate weighted score - THIS IS THE KEY CHANGE
-          double score;
-          if (jobKeywords.isEmpty) {
-            // If job doesn't specify technical skills, use soft skills (max 70%)
-            score = (matchingSoftSkills.length / softSkills.length) * 0.7;
+debugPrint('Job category weights: $categoryWeights');
 
-            // Add minor variation to avoid all having the same score
-            final variation = (applicantId.hashCode % 20) / 100;
-            score = (score + variation).clamp(0.3, 0.7);
-          } else {
-            // Technical skills = 75% of score weight
-            double techScore = jobKeywords.isEmpty ? 0.4 :
-            matchingTechSkills.length / jobKeywords.length;
+// Determine if job is more technical or soft-skills oriented
+final bool isTechnicalJob = totalTechSkillsInJob > 5;
+final techSkillWeight = isTechnicalJob ? 0.8 : 0.6;
+final softSkillWeight = 1.0 - techSkillWeight;
 
-            // Soft skills = 25% of score weight
-            double softScore = matchingSoftSkills.length / softSkills.length;
+debugPrint('Job type: ${isTechnicalJob ? "Technical" : "Soft-skills"} focused');
+debugPrint('Tech/Soft skill weights: $techSkillWeight/$softSkillWeight');
 
-            // Combined weighted score with small variation
-            final variation = (applicantId.hashCode % 15) / 100;
-            score = ((techScore * 0.75) + (softScore * 0.25) + variation).clamp(0.1, 0.95);
-          }
+for (final app in applications) {
+try {
+final applicantId = app['applicant_id'] as String?;
+if (applicantId == null) continue;
 
-          // Determine match decision
-          final String decision = score >= 0.75 ? 'Match' : 'No Match';
+// Get resume text
+final resumeText = await getResumeText(applicantId) ?? '';
+if (resumeText.isEmpty) {
+debugPrint('No resume text available for $applicantId');
+continue;
+}
 
-          // Generate appropriate suggestion based on score and matches
-          String suggestion;
-          if (score >= 0.75) {
-            suggestion = "Excellent match! The applicant has all the required skills.";
-          } else if (score > 0.5) {
-            suggestion = "Good match with ${matchingTechSkills.length} skills. Could improve by adding: ${missingSkills.take(3).join(', ')}.";
-          } else {
-            suggestion = "Consider adding skills in: ${missingSkills.join(', ')}.";
-          }
+final resumeTextLower = resumeText.toLowerCase();
 
-          rankedApplications.add({
-            'application': app,
-            'score': score,
-            'matching_skills': matchingTechSkills,
-            'missing_skills': missingSkills,
-            'matching_soft_skills': matchingSoftSkills,
-            'decision': decision,
-            'improvement_suggestions': suggestion,
-          });
-        } catch (e) {
-          debugPrint('Error processing application: $e');
-        }
-      }
+// Technical skills evaluation with category weighting
+Map<String, List<String>> matchingTechSkillsByCategory = {};
+Map<String, List<String>> missingTechSkillsByCategory = {};
 
-      // Sort by score in descending order
-      rankedApplications.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+// Calculate weighted technical score based on job requirements
+double weightedTechScore = 0;
+double maxPossibleTechScore = 0;
 
-      return rankedApplications;
-    } catch (e) {
-      debugPrint('Error in rankApplications: $e');
-      return [];
-    }
-  }
+technicalSkillsMap.forEach((category, skills) {
+final categoryWeight = categoryWeights[category] ?? 0;
+if (categoryWeight > 0) {
+maxPossibleTechScore += categoryWeight;
 
-// Simple keyword extraction method
-  List<String> _extractKeywords(String text) {
-    final commonSkills = [
-      'python', 'java', 'javascript', 'typescript', 'flutter', 'dart',
-      'react', 'angular', 'vue', 'node', 'express', 'django', 'flask',
-      'spring', 'html', 'css', 'sql', 'nosql', 'mongodb', 'postgresql',
-      'mysql', 'git', 'docker', 'kubernetes', 'aws', 'azure', 'gcp',
-      'firebase', 'mobile', 'web', 'frontend', 'backend', 'fullstack',
-      'devops', 'machine learning', 'data science', 'ai', 'cloud'
-    ];
+// Find skills in this category that match
+final matchingSkills = skills.where(
+(skill) => resumeTextLower.contains(skill)
+).toList();
 
-    return commonSkills.where((skill) => text.contains(skill)).toList();
-  }
+// Find important skills in this category that are missing
+final missingSkills = skills.where(
+(skill) => jobDescLower.contains(skill) && !resumeTextLower.contains(skill)
+).toList();
 
-// Generate a basic improvement suggestion
-  String _generateBasicSuggestion(List<String> matchingSkills, List<String> missingSkills) {
-    if (missingSkills.isEmpty) {
-      return "Excellent match! The applicant has all the required skills.";
-    } else if (matchingSkills.isEmpty) {
-      return "Consider adding skills in: ${missingSkills.join(', ')}.";
-    } else {
-      return "Good match with ${matchingSkills.length} skills. Could improve by adding: ${missingSkills.take(3).join(', ')}.";
-    }
-  }
+// Store for later use
+if (matchingSkills.isNotEmpty) {
+matchingTechSkillsByCategory[category] = matchingSkills;
+}
 
-// Add this method to generate fallback rankings when the API fails
-  List<Map<String, dynamic>> _createFallbackRanking(String jobDescription, List<String> resumes) {
-    final List<Map<String, dynamic>> results = [];
-    final jobKeywords = _extractKeywords(jobDescription.toLowerCase());
+if (missingSkills.isNotEmpty) {
+missingTechSkillsByCategory[category] = missingSkills;
+}
 
-    for (int i = 0; i < resumes.length; i++) {
-      final resumeText = resumes[i].toLowerCase();
-      final resumeKeywords = _extractKeywords(resumeText);
+// Calculate score for this category
+final categoryMatchScore = matchingSkills.length / skills.length.clamp(1, double.infinity);
+weightedTechScore += categoryWeight * categoryMatchScore;
+}
+});
 
-      // Calculate matching and missing skills
-      final matchingSkills = jobKeywords.where((k) => resumeText.contains(k)).toList();
-      final missingSkills = jobKeywords.where((k) => !resumeText.contains(k)).toList();
+// Normalize technical score
+final normalizedTechScore = maxPossibleTechScore > 0
+? weightedTechScore / maxPossibleTechScore
+    : 0.5; // Default to 0.5 if no tech skills in job description
 
-      // Calculate a score based on matched keywords
-      final score = jobKeywords.isEmpty ? 0.0 : matchingSkills.length / jobKeywords.length;
+// Soft skills evaluation
+final matchingSoftSkills = <String>[];
+softSkillsMap.forEach((category, skills) {
+for (final skill in skills) {
+if (resumeTextLower.contains(skill)) {
+matchingSoftSkills.add(skill);
+break; // Only count one match per category
+}
+}
+});
 
-      results.add({
-        'resume_index': i,
-        'score': score,
-        'matching_skills': matchingSkills,
-        'missing_skills': missingSkills,
-      });
-    }
+// Calculate soft skills score (0-1)
+final softScore = matchingSoftSkills.length / softSkillsMap.length;
 
-    return results;
-  }
+// Combined weighted score
+final combinedScore = (normalizedTechScore * techSkillWeight) +
+(softScore * softSkillWeight);
 
-  // Store ranking results
-  Future<void> _storeRankingResults(String jobId, List<Map<String, dynamic>> rankedApplications) async {
-    try {
-      // Delete existing ranking results
-      await _supabaseClient
-          .from('ranking_results')
-          .delete()
-          .eq('job_id', jobId);
+// Add slight grade adjustment for experience level if mentioned in resume
+double experienceBonus = 0;
 
-      // Insert new ranking results
-      for (var app in rankedApplications) {
-        final appData = app['application'] as Map<String, dynamic>;
-        await _supabaseClient.from('ranking_results').insert({
-          'job_id': jobId,
-          'application_id': appData['id'],
-          'applicant_id': appData['applicant_id'],
-          'score': app['score'],
-          'matching_skills': app['matching_skills'],
-          'missing_skills': app['missing_skills'],
-        });
-      }
-    } catch (e) {
-      debugPrint('Error storing ranking results: $e');
-      // Continue even if storing fails
-    }
-  }
+if (resumeTextLower.contains('senior') ||
+resumeTextLower.contains('lead') ||
+resumeTextLower.contains('5+ years')) {
+experienceBonus = 0.05;
+} else if (resumeTextLower.contains('3+ years') ||
+resumeTextLower.contains('mid-level')) {
+experienceBonus = 0.03;
+}
+
+// Final score with experience adjustment, clamped between 0.1 and 0.98
+final finalScore = (combinedScore + experienceBonus).clamp(0.1, 0.98);
+
+// Flatten matching/missing skills for display
+final allMatchingTech = matchingTechSkillsByCategory.values.expand((i) => i).toSet().toList();
+final allMissingTech = missingTechSkillsByCategory.values.expand((i) => i).toSet().toList();
+
+// Generate decision and suggestion
+String decision = "No Match";
+String suggestion;
+
+if (finalScore >= 0.80) {
+decision = "Strong Match";
+suggestion = "Excellent candidate with all key skills and experience required.";
+} else if (finalScore >= 0.65) {
+decision = "Good Match";
+suggestion = "Good candidate with most key skills. ${allMissingTech.isNotEmpty ? 'Could improve by adding: ${allMissingTech.take(3).join(', ')}.' : ''}";
+} else if (finalScore >= 0.50) {
+decision = "Potential Match";
+suggestion = "Has some relevant skills but lacks key requirements. Consider adding: ${allMissingTech.take(4).join(', ')}.";
+} else {
+suggestion = "Not a good match for this role. Missing critical skills: ${allMissingTech.take(5).join(', ')}.";
+}
+
+// Store detailed ranking data
+rankedApplications.add({
+'application': app,
+'score': finalScore,
+'tech_score': normalizedTechScore,
+'soft_score': softScore,
+'matching_skills': allMatchingTech,
+'missing_skills': allMissingTech,
+'matching_soft_skills': matchingSoftSkills,
+'decision': decision,
+'improvement_suggestions': suggestion,
+'application_status': app['application_status'] ?? 'Pending',
+'applicant_name': _getApplicantName(app),
+});
+} catch (e) {
+debugPrint('Error processing application: $e');
+}
+}
+
+// Sort by score in descending order
+rankedApplications.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+// Log ranking results for debugging
+for (final app in rankedApplications) {
+final score = app['score'] as double;
+debugPrint('Ranked ${app['applicant_name']} with score: ${(score * 100).toStringAsFixed(1)}%');
+}
+
+// Store ranking results in database
+try {
+await _storeRankingResults(jobId, rankedApplications);
+} catch (e) {
+debugPrint('Error storing ranking results: $e');
+}
+
+return rankedApplications;
+} catch (e) {
+debugPrint('Error in rankApplications: $e');
+return [];
+}
+}
+
+// Helper to get applicant name
+String _getApplicantName(Map<String, dynamic> application) {
+try {
+if (application['applicant'] != null) {
+final applicant = application['applicant'] as Map<String, dynamic>;
+if (applicant['name'] != null) return applicant['name'];
+}
+
+if (application['applicant_id'] != null) {
+final id = application['applicant_id'].toString();
+return 'Applicant ${id.substring(0, id.length > 8 ? 8 : id.length)}';
+}
+
+return 'Unknown Applicant';
+} catch (e) {
+return 'Unknown Applicant';
+}
+}
+
+// Store ranking results
+Future<void> _storeRankingResults(String jobId, List<Map<String, dynamic>> rankedApplications) async {
+try {
+// Delete existing ranking results
+await _supabaseClient
+    .from('ranking_results')
+    .delete()
+    .eq('job_id', jobId);
+
+// Prepare batch insert data
+final List<Map<String, dynamic>> rankingsToInsert = [];
+
+for (var app in rankedApplications) {
+final appData = app['application'] as Map<String, dynamic>;
+rankingsToInsert.add({
+'job_id': jobId,
+'application_id': appData['application_id'],
+'applicant_id': appData['applicant_id'],
+'score': app['score'],
+'matching_skills': app['matching_skills'],
+'missing_skills': app['missing_skills'],
+'decision': app['decision'],
+'created_at': DateTime.now().toIso8601String(),
+});
+}
+
+// Insert in batches to avoid request size limitations
+const batchSize = 10;
+for (int i = 0; i < rankingsToInsert.length; i += batchSize) {
+final end = (i + batchSize < rankingsToInsert.length)
+? i + batchSize
+    : rankingsToInsert.length;
+
+final batch = rankingsToInsert.sublist(i, end);
+await _supabaseClient.from('ranking_results').insert(batch);
+}
+
+debugPrint('Successfully stored ${rankingsToInsert.length} ranking results');
+} catch (e) {
+debugPrint('Error storing ranking results: $e');
+// Continue even if storing fails
+}
+}
 }

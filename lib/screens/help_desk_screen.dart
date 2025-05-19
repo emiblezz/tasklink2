@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:tasklink2/utils/theme.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 class HelpDeskScreen extends StatefulWidget {
   final bool isRecruiter;
@@ -34,6 +35,7 @@ class _HelpDeskScreenState extends State<HelpDeskScreen> {
       'answer': 'You can contact our support team via email at support@tasklink.com or use the Contact Support option in this Help Desk.'
     },
   ];
+
 
   final List<Map<String, dynamic>> _recruiterFaqList = [
     {
@@ -305,97 +307,99 @@ class _HelpDeskScreenState extends State<HelpDeskScreen> {
   }
 
   Widget _buildContactTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Contact Support',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildContactMethod(
-            icon: Icons.email,
-            title: 'Email Support',
-            description: widget.isRecruiter
-                ? 'recruiter-support@tasklink.com'
-                : 'support@tasklink.com',
-            onTap: () => _launchEmail(widget.isRecruiter
-                ? 'recruiter-support@tasklink.com'
-                : 'support@tasklink.com'),
-          ),
-          const SizedBox(height: 16),
-          _buildContactMethod(
-            icon: Icons.phone,
-            title: 'Phone Support',
-            description: '+256 700 123 456',
-            onTap: () => _launchPhone('+256700123456'),
-          ),
-          const SizedBox(height: 16),
-          _buildContactMethod(
-            icon: Icons.chat_bubble_outline,
-            title: 'Live Chat',
-            description: 'Chat with a support agent',
-            onTap: () => _showLiveChatDialog(context),
-          ),
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 24),
-          const Text(
-            'Submit Feedback',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    maxLines: 5,
-                    decoration: InputDecoration(
-                      hintText: 'Share your thoughts or report an issue...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      // Replace AppTheme.primaryColor with Theme.of(context).colorScheme.primary
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Thank you for your feedback!'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      'Submit Feedback',
-                      style: TextStyle(fontSize: 16),
-                    ),
-                  ),
-                ],
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Contact Support',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 24),
+            _buildContactMethod(
+              icon: Icons.email,
+              title: 'Email Support',
+              description: widget.isRecruiter
+                  ? 'recruiter-support@tasklink.com'
+                  : 'support@tasklink.com',
+              onTap: () => _launchEmail(widget.isRecruiter
+                  ? 'recruiter-support@tasklink.com'
+                  : 'support@tasklink.com'),
+            ),
+            const SizedBox(height: 16),
+            _buildContactMethod(
+              icon: Icons.phone,
+              title: 'Phone Support',
+              description: '+256 780 245 409',
+              onTap: () => _launchPhone('+256780245409'),
+            ),
+            const SizedBox(height: 16),
+            _buildContactMethod(
+              icon: Icons.chat_bubble_outline,
+              title: 'Live Chat',
+              description: 'Chat with a support agent',
+              onTap: () => _showLiveChatDialog(context),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text(
+              'Submit Feedback',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      maxLines: 5,
+                      decoration: InputDecoration(
+                        hintText: 'Share your thoughts or report an issue...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Thank you for your feedback!'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        'Submit Feedback',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -427,18 +431,78 @@ class _HelpDeskScreenState extends State<HelpDeskScreen> {
       },
     );
 
-    if (await canLaunchUrl(emailUri)) {
-      await launchUrl(emailUri);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not launch email client. Please email $email directly.'),
-            backgroundColor: Colors.red,
-          ),
+    try {
+      // First attempt: Try to launch directly with explicit external application mode
+      if (await canLaunchUrl(emailUri)) {
+        final launched = await launchUrl(
+          emailUri,
+          mode: LaunchMode.externalApplication,
         );
+
+        if (!launched) {
+          // If direct launch failed, show clipboard option
+          _showEmailFallbackDialog(email);
+        }
+      } else {
+        // If canLaunchUrl returns false, show clipboard option
+        _showEmailFallbackDialog(email);
       }
+    } catch (e) {
+      debugPrint('Error launching email: $e');
+      // Show clipboard dialog as fallback
+      _showEmailFallbackDialog(email);
     }
+  }
+
+// Add this helper method to provide a clipboard fallback
+  void _showEmailFallbackDialog(String email) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Email App Not Found'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Could not find an email app on your device. Would you like to copy the email address to your clipboard?'
+              ),
+              const SizedBox(height: 12),
+              Text(
+                email,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: email));
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Email address copied to clipboard'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+              child: const Text('Copy Email'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _launchPhone(String phoneNumber) async {
@@ -454,7 +518,7 @@ class _HelpDeskScreenState extends State<HelpDeskScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not launch phone app. Please call $phoneNumber directly.'),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.white,
           ),
         );
       }

@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:tasklink2/models/application_model.dart';
 import 'package:tasklink2/models/job_model.dart';
@@ -16,6 +20,8 @@ import 'package:tasklink2/services/ai_services.dart';
 import 'package:tasklink2/services/supabase_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+
+import '../../services/supabase_service.dart';
 
 class CVRankingScreen extends StatefulWidget {
   final JobModel job;
@@ -66,6 +72,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
 
     // Initialize notification service
     _notificationService = Provider.of<NotificationService>(context, listen: false);
+
   }
 
   @override
@@ -516,68 +523,240 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
   // Method to view or download a resume
-  Future<void> _viewApplicantResume(String applicantId) async {
+  Future<void> downloadAndSaveCV(BuildContext context, String applicantId) async {
+    final supabaseService = SupabaseService();
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        title: Text('Accessing CV'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Locating CV file...'),
+          ],
+        ),
+      ),
+    );
+
     try {
-      setState(() {
-        _isLoading = true;
-      });
+      // Get the jobseeker profile to find the CV URL
+      final profileData = await supabaseService.getJobseekerProfileData(applicantId);
 
-      // Get resume URL
-      final resumeData = await _resumeService.getUserResume(applicantId);
+      // Close the loading dialog
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
-      setState(() {
-        _isLoading = false;
-      });
-
-      if (resumeData == null || resumeData['file_url'] == null) {
+      // Check if profile and CV exists
+      if (profileData == null || profileData['cv'] == null || profileData['cv'].toString().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No resume found for this applicant'),
+            content: Text('No CV found for this applicant'),
             backgroundColor: Colors.orange,
           ),
         );
         return;
       }
 
-      // Show dialog with options to view or download
+      final cvUrl = profileData['cv'].toString();
+      debugPrint('Found CV URL: $cvUrl');
+
+      // Extract filename from the URL
+      String filename = cvUrl.split('/').last;
+      if (filename.isEmpty || !filename.contains('.')) {
+        // If filename is invalid or has no extension, use a default name with timestamp
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        filename = 'applicant_cv_$timestamp.pdf';
+      }
+
+      // Show download progress dialog
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Resume Options'),
-          content: const Text('Would you like to view or download this resume?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _launchURL(resumeData['file_url']);
-              },
-              child: const Text('View'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Share.share(resumeData['file_url'], subject: 'Resume file');
-              },
-              child: const Text('Download'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          title: Text('Downloading'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Downloading CV file...'),
+            ],
+          ),
         ),
       );
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
 
+      try {
+        // Get the response from the URL
+        final response = await http.get(Uri.parse(cvUrl));
+
+        if (response.statusCode != 200) {
+          throw Exception('Failed to download file: HTTP ${response.statusCode}');
+        }
+
+        // Determine where to save the file
+        final filePath = await _getSaveLocation(filename);
+
+        if (filePath == null) {
+          // User canceled or directory selection failed
+          // Close download dialog
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Download canceled'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Write to the file
+        final file = File(filePath);
+        await file.writeAsBytes(response.bodyBytes);
+
+        // Close download dialog
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        // Show success dialog with file path
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Download Complete'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('CV has been downloaded successfully.'),
+                const SizedBox(height: 8),
+                const Text('File saved to:'),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    filePath,
+                    style: const TextStyle(fontWeight: FontWeight.bold, color:Colors.black),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+              // Option to share the file
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Share.shareXFiles([XFile(filePath)], text: 'Applicant CV: $filename');
+                },
+                child: const Text('Share'),
+              ),
+            ],
+          ),
+        );
+      } catch (e) {
+        // Close download dialog if open
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+
+        debugPrint('Error downloading CV: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error downloading CV: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Error fetching profile or CV: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error accessing resume: $e'),
+          content: Text('Error accessing CV: $e'),
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+// Helper method to get the save location
+  Future<String?> _getSaveLocation(String filename) async {
+    try {
+      // For Android and iOS, use the downloads directory
+      final directory = await _getDownloadsDirectory();
+
+      if (directory != null) {
+        // Create a unique filename if one already exists
+        final baseFilename = filename.contains('.')
+            ? filename.substring(0, filename.lastIndexOf('.'))
+            : filename;
+        final extension = filename.contains('.')
+            ? filename.substring(filename.lastIndexOf('.'))
+            : '.pdf';
+
+        String uniqueFilename = filename;
+        int counter = 1;
+
+        while (await File('${directory.path}/$uniqueFilename').exists()) {
+          uniqueFilename = '${baseFilename}_$counter$extension';
+          counter++;
+        }
+
+        return '${directory.path}/$uniqueFilename';
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error getting save location: $e');
+      return null;
+    }
+  }
+
+// Helper to get downloads directory based on platform
+  Future<Directory?> _getDownloadsDirectory() async {
+    try {
+      if (Platform.isAndroid) {
+        // For Android, use the Downloads directory
+        final directory = Directory('/storage/emulated/0/Download');
+        if (await directory.exists()) {
+          return directory;
+        }
+
+        // Fallback to external storage directory
+        final externalDir = await getExternalStorageDirectory();
+        return externalDir;
+      } else if (Platform.isIOS) {
+        // For iOS, use the Documents directory
+        final directory = await getApplicationDocumentsDirectory();
+        return directory;
+      } else {
+        // For other platforms, use temp directory
+        final directory = await getTemporaryDirectory();
+        return directory;
+      }
+    } catch (e) {
+      debugPrint('Error getting downloads directory: $e');
+      // Fallback to temp directory
+      return await getTemporaryDirectory();
     }
   }
 
@@ -881,17 +1060,22 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // For recruiters - View Resume
+                    // For recruiters - Download CV
                     if (widget.job.recruiterId == _currentUserId && applicantId != null)
-                      TextButton.icon(
-                        onPressed: () => _viewApplicantResume(applicantId),
-                        icon: const Icon(Icons.description, size: 16),
-                        label: const Text('View Resume'),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Download CV'),
+                        onPressed: () => downloadAndSaveCV(context, applicantId),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          side: BorderSide(color: Theme.of(context).colorScheme.primary),
+                        ),
                       ),
 
                     const SizedBox(width: 8),
 
-                    // For recruiters - Action menu with status options
+                    // For recruiters - Status Update Button with Popup
                     if (widget.job.recruiterId == _currentUserId && applicationId != null)
                       PopupMenuButton<String>(
                         onSelected: (status) {
@@ -911,26 +1095,38 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
                             child: Text('Mark as Rejected'),
                           ),
                         ],
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.update),
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.update, size: 16,),
                           label: const Text('Update Status'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Theme.of(context).colorScheme.primary,
+                          onPressed: null, // handled by PopupMenuButton
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            side: BorderSide(color: Theme.of(context).colorScheme.primary),
                           ),
-                          onPressed: null, // This is handled by PopupMenuButton
                         ),
                       ),
 
+                    const SizedBox(width: 8),
+
                     // For job seekers - View Job Details
                     if (widget.job.recruiterId != _currentUserId)
-                      ElevatedButton(
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.visibility, size: 16),
+                        label: const Text('View Job Details'),
                         onPressed: () {
                           // Navigate to job details
                         },
-                        child: const Text('View Job Details'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          side: BorderSide(color: Theme.of(context).colorScheme.primary),
+                        ),
                       ),
                   ],
-                ),
+                )
+
+
               ],
             ),
           ),
@@ -949,6 +1145,106 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     return const Center(child: Text("Analytics Tab"));
   }
 
+  Widget _buildScoreIndicator(double score) {
+    return Row(
+      children: [
+        Container(
+          width: 120,
+          height: 12,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            color: Colors.grey.shade200,
+          ),
+          child: Row(
+            children: [
+              // Green zone (80-100%)
+              Container(
+                width: 120 * 0.2, // 20% of total width
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(6),
+                    bottomLeft: Radius.circular(6),
+                  ),
+                  color: Colors.green.shade200,
+                ),
+              ),
+              // Yellow zone (65-80%)
+              Container(
+                width: 120 * 0.15, // 15% of total width
+                color: Colors.lightGreen.shade200,
+              ),
+              // Orange zone (50-65%)
+              Container(
+                width: 120 * 0.15, // 15% of total width
+                color: Colors.orange.shade200,
+              ),
+              // Red zone (0-50%)
+              Container(
+                width: 120 * 0.5, // 50% of total width
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(6),
+                    bottomRight: Radius.circular(6),
+                  ),
+                  color: Colors.red.shade200,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Indicator of current score
+        Container(
+          margin: EdgeInsets.only(top: -10, left: score * 120 - 8),
+          child: Icon(
+            Icons.arrow_drop_down,
+            color: _getScoreColor(score),
+            size: 24,
+          ),
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildDecisionLabel(String decision) {
+    Color bgColor;
+    Color textColor;
+
+    switch (decision) {
+      case "Strong Match":
+        bgColor = Colors.green.shade100;
+        textColor = Colors.green.shade800;
+        break;
+      case "Good Match":
+        bgColor = Colors.lightGreen.shade100;
+        textColor = Colors.green.shade700;
+        break;
+      case "Potential Match":
+        bgColor = Colors.orange.shade100;
+        textColor = Colors.orange.shade800;
+        break;
+      default: // "No Match"
+        bgColor = Colors.red.shade100;
+        textColor = Colors.red.shade800;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        decision,
+        style: TextStyle(
+          color: textColor,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Pending':
@@ -962,11 +1258,12 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
     }
   }
 
-  Color _getScoreColor(double score) {
-    if (score >= 0.8) return Colors.green;
-    if (score >= 0.6) return Colors.blue;
-    if (score >= 0.4) return Colors.orange;
-    return Colors.red;
+  Color _getScoreColor(double? score) {
+    if (score == null) return Colors.grey;
+    if (score >= 0.80) return Colors.green.shade700;
+    if (score >= 0.65) return Colors.green.shade500;
+    if (score >= 0.50) return Colors.orange.shade500;
+    return Colors.red.shade500;
   }
 
   String _formatDate(DateTime date) {
