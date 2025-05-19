@@ -79,4 +79,32 @@ class SimilarityService {
       throw Exception('Failed to get similarity score: ${response.body} code: ${response.statusCode}');
     }
   }
+
+  Future<SimilarityResponse> checkFileSimilarity({
+    required String resume,
+    required String jobDescription,
+    required double threshold,
+  }) async {
+    final url = Uri.parse('$baseUrl/match_resume_file');
+
+    print(url);
+    final headers = {'Content-Type': 'application/json'};
+    final body = jsonEncode({
+      'resume': resume,
+      'job_description': jobDescription,
+      'threshold': threshold,
+    });
+
+    final response = await http.post(url, headers: headers, body: body);
+
+    print("response: ${response.body}");
+
+    if (response.statusCode == 200) {
+      final jsonResponse = jsonDecode(response.body);
+      return SimilarityResponse.fromJson(jsonResponse);
+    } else {
+      print("body: ${response.body}");
+      throw Exception('Failed to get similarity score: ${response.body} code: ${response.statusCode}');
+    }
+  }
 }

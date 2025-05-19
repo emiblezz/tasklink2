@@ -93,9 +93,9 @@ class ResumeService {
       // Access the supabase client however it's defined in your ResumeService class
       final response = await _supabaseClient
           .from('resumes')
-          .select('file_url, text, created_at, resume_id')
-          .eq('user_id', userId)
-          .order('created_at', ascending: false)
+          .select('filename, text, resume_id')
+          .eq('applicant_id', userId)
+          // .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
 

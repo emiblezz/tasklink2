@@ -13,6 +13,7 @@ import 'package:tasklink2/services/resume_match_service.dart';
 import 'package:tasklink2/services/resume_service.dart';
 import 'package:tasklink2/config/app_config.dart';
 import 'package:tasklink2/services/ai_services.dart';
+import 'package:tasklink2/services/supabase_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -262,18 +263,8 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
       print("ID ${widget.job.id!.toString()}");
 
       final similarityService = SimilarityService(
-        baseUrl: 'http://192.168.1.6:8000',
+        baseUrl: 'http://192.168.1.7:8000',
       );
-
-      String resume = "I am a python developer";
-      String jobDescription = "I am a python developer";
-
-      print("test");
-      score_value = await similarityService.checkSimilarity(resume: resume, jobDescription: jobDescription, threshold: 0.7);
-
-      print(score_value.toString());
-      print("Value: ${score_value.similarityScore}");
-      print("Not Empty: ${matchResults.isNotEmpty}");
 
       if (!mounted) return;  // Check if widget is still mounted
 
@@ -291,9 +282,17 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
                 .eq('job_id', widget.job.id)
                 .single();
 
+            final resume = await _resumeService.getUserResume(result.applicantId);
+            // final jobDescription = "Testing";
+            final jobDescription = await AppConfig().supabaseClient.from("job_postings").select("description").eq("job_id", widget.job.id).limit(1).single();
+            // print("jd: $jobDescription");
+            score_value = await similarityService.checkFileSimilarity(resume: resume!["text"], jobDescription: jobDescription["description"], threshold: 0.7);
+
+            // print("URL: $resumeURL -> ${result.applicantId}");
+
             var skills = classifySkills(score_value.wordMatches);
 
-            print("Skills: $skills");
+            // print("Skills: $skills");
 
             applicationsList.add({
               'application': appData,
