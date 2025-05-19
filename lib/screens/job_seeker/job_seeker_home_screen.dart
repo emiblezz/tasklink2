@@ -10,9 +10,13 @@ import 'package:tasklink2/services/job_service.dart';
 import 'package:tasklink2/services/profile_service.dart';
 import 'package:intl/intl.dart';
 
+import '../../models/job_search_model.dart';
+import '../../services/search_history_service.dart';
 import '../../widgets/job_card.dart';
 import '../../widgets/notification_badge.dart';
+import '../../widgets/search_history_widget.dart';
 import '../help_desk_screen.dart';
+import '../search_screen.dart';
 import '../settings_screen.dart';
 
 
@@ -206,21 +210,65 @@ class _JobsTab extends StatefulWidget {
   State<_JobsTab> createState() => _JobsTabState();
 }
 
+// Now let's modify the _JobsTabState in job_seeker_home_screen.dart to use our new advanced search
+
 class _JobsTabState extends State<_JobsTab> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   List<JobModel> _searchResults = [];
   bool _isSearching = false;
+  JobSearchFilters? _activeFilters;
+  int _activeFilterCount = 0;
+  bool _showSearchHistory = false;
 
   @override
   void initState() {
     super.initState();
     _loadJobs();
+
+    // Initialize search history
+    final searchHistoryService = Provider.of<SearchHistoryService>(context, listen: false);
+    searchHistoryService.initialize();
+
+    // Listen for search focus to show history
+    _searchController.addListener(_onSearchChanged);
+    _searchFocusNode.addListener(_onFocusChanged);
   }
 
   @override
   void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchFocusNode.removeListener(_onFocusChanged);
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged() {
+    if (_searchController.text.isEmpty) {
+      if (_searchFocusNode.hasFocus) {
+        setState(() {
+          _showSearchHistory = true;
+        });
+      }
+    } else {
+      setState(() {
+        _showSearchHistory = false;
+      });
+      _searchJobs(_searchController.text);
+    }
+  }
+
+  void _onFocusChanged() {
+    if (_searchFocusNode.hasFocus && _searchController.text.isEmpty) {
+      setState(() {
+        _showSearchHistory = true;
+      });
+    } else if (!_searchFocusNode.hasFocus) {
+      setState(() {
+        _showSearchHistory = false;
+      });
+    }
   }
 
   Future<void> _loadJobs() async {
@@ -229,7 +277,7 @@ class _JobsTabState extends State<_JobsTab> {
   }
 
   Future<void> _searchJobs(String query) async {
-    if (query.isEmpty) {
+    if (query.isEmpty && (_activeFilters == null || _activeFilters!.isEmpty())) {
       setState(() {
         _searchResults = [];
         _isSearching = false;
@@ -243,12 +291,23 @@ class _JobsTabState extends State<_JobsTab> {
 
     try {
       final jobService = Provider.of<JobService>(context, listen: false);
-      final results = await jobService.searchJobs(query);
+
+      // Apply text search and any active filters
+      JobSearchFilters filters = _activeFilters ?? JobSearchFilters();
+      filters.query = query;
+
+      final results = await jobService.advancedSearchJobs(filters);
 
       setState(() {
         _searchResults = results;
         _isSearching = false;
       });
+
+      // Save search to history if it has results and is not empty
+      if (results.isNotEmpty && !filters.isEmpty()) {
+        final searchHistoryService = Provider.of<SearchHistoryService>(context, listen: false);
+        await searchHistoryService.addSearch(filters);
+      }
     } catch (e) {
       setState(() {
         _isSearching = false;
@@ -256,7 +315,101 @@ class _JobsTabState extends State<_JobsTab> {
     }
   }
 
+  Future<void> _openAdvancedSearch() async {
+    // Hide search history when opening advanced search
+    setState(() {
+      _showSearchHistory = false;
+      _searchFocusNode.unfocus();
+    });
+
+    final result = await Navigator.push<JobSearchFilters>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AdvancedSearchScreen(
+          initialFilters: _activeFilters,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _activeFilters = result;
+        // Preserve the search text if already entered
+        if (_searchController.text.isNotEmpty) {
+          _activeFilters!.query = _searchController.text;
+        }
+
+        // Count active filters (excluding the query which is shown in the search box)
+        _activeFilterCount = 0;
+        if (result.location != null && result.location!.isNotEmpty) _activeFilterCount++;
+        if (result.jobTypes != null && result.jobTypes!.isNotEmpty) _activeFilterCount++;
+        if (result.minSalary != null || result.maxSalary != null) _activeFilterCount++;
+        if (result.skills != null && result.skills!.isNotEmpty) _activeFilterCount++;
+        if (result.isRemote == true) _activeFilterCount++;
+      });
+
+      // Perform the search with the new filters
+      final jobService = Provider.of<JobService>(context, listen: false);
+      setState(() {
+        _isSearching = true;
+      });
+
+      final results = await jobService.advancedSearchJobs(_activeFilters!);
+
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
+
+      // Save search to history if it has results
+      if (results.isNotEmpty) {
+        final searchHistoryService = Provider.of<SearchHistoryService>(context, listen: false);
+        await searchHistoryService.addSearch(_activeFilters!);
+      }
+    }
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _activeFilters = null;
+      _activeFilterCount = 0;
+      _searchController.clear();
+      _searchResults = [];
+      _isSearching = false;
+    });
+  }
+
+  void _applyHistorySearch(JobSearchFilters filters) {
+    setState(() {
+      _activeFilters = filters;
+      _showSearchHistory = false;
+
+      // Update search bar with query
+      if (filters.query != null && filters.query!.isNotEmpty) {
+        _searchController.text = filters.query!;
+      } else {
+        _searchController.clear();
+      }
+
+      // Count active filters (excluding the query which is shown in the search box)
+      _activeFilterCount = 0;
+      if (filters.location != null && filters.location!.isNotEmpty) _activeFilterCount++;
+      if (filters.jobTypes != null && filters.jobTypes!.isNotEmpty) _activeFilterCount++;
+      if (filters.minSalary != null || filters.maxSalary != null) _activeFilterCount++;
+      if (filters.skills != null && filters.skills!.isNotEmpty) _activeFilterCount++;
+      if (filters.isRemote == true) _activeFilterCount++;
+    });
+
+    // Perform the search
+    _searchJobs(filters.query ?? '');
+  }
+
   void _viewJobDetails(JobModel job) {
+    setState(() {
+      _showSearchHistory = false;
+      _searchFocusNode.unfocus();
+    });
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -268,125 +421,250 @@ class _JobsTabState extends State<_JobsTab> {
     });
   }
 
-  // In _JobsTabState (in job_seeker_home_screen.dart)
   @override
   Widget build(BuildContext context) {
     final jobService = Provider.of<JobService>(context);
     final List<JobModel> displayJobs = _isSearching
         ? _searchResults
-        : jobService.visibleJobs; // Use visibleJobs instead of jobs
+        : jobService.visibleJobs;
 
-    return Column(
+    return Stack(
       children: [
-        // Search bar (keep your existing code)
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search for jobs',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                icon: const Icon(Icons.clear),
-                onPressed: () {
-                  _searchController.clear();
-                  _searchJobs('');
-                },
-              )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8.0),
+        Column(
+          children: [
+            // Enhanced search bar with filters
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      // Expanded search field
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          decoration: InputDecoration(
+                            hintText: 'Search for jobs, companies, skills...',
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: _searchController.text.isNotEmpty
+                                ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                _searchJobs('');
+                              },
+                            )
+                                : null,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            if (value.isEmpty) {
+                              setState(() {
+                                _showSearchHistory = _searchFocusNode.hasFocus;
+                                _searchResults = [];
+                                _isSearching = false;
+                              });
+                            } else {
+                              setState(() {
+                                _showSearchHistory = false;
+                              });
+                              _searchJobs(value);
+                            }
+                          },
+                          onTap: () {
+                            if (_searchController.text.isEmpty) {
+                              setState(() {
+                                _showSearchHistory = true;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      // Filter button
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: _openAdvancedSearch,
+                        borderRadius: BorderRadius.circular(8.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          child: Badge(
+                            isLabelVisible: _activeFilterCount > 0,
+                            label: Text(_activeFilterCount.toString()),
+                            child: const Icon(
+                              Icons.filter_list,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // Show active filters chip
+                  if (_activeFilterCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Row(
+                        children: [
+                          Chip(
+                            label: Text('$_activeFilterCount active ${_activeFilterCount == 1 ? 'filter' : 'filters'}'),
+                            deleteIcon: const Icon(Icons.clear, size: 18),
+                            onDeleted: _clearFilters,
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: _openAdvancedSearch,
+                            child: const Text('Edit Filters'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
-            onChanged: _searchJobs,
-          ),
+
+            // Job listings
+            Expanded(
+              child: jobService.isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : displayJobs.isEmpty
+                  ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.work_off_outlined,
+                      size: 64,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _isSearching
+                          ? _activeFilterCount > 0
+                          ? 'No jobs match your search filters'
+                          : 'No jobs found for "${_searchController.text}"'
+                          : 'No jobs available',
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    if (!_isSearching)
+                      const Text(
+                        'Check back later for new opportunities',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    const SizedBox(height: 24),
+                    if (_isSearching || _activeFilterCount > 0)
+                      ElevatedButton.icon(
+                        onPressed: _clearFilters,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Clear Search & Filters'),
+                      ),
+                    if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
+                      ElevatedButton(
+                        onPressed: () {
+                          jobService.clearDismissedJobs();
+                        },
+                        child: const Text('Show Hidden Jobs'),
+                      ),
+                  ],
+                ),
+              )
+                  : Stack(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: _loadJobs,
+                    child: ListView.builder(
+                      itemCount: displayJobs.length,
+                      itemBuilder: (context, index) {
+                        final job = displayJobs[index];
+                        return JobCard(
+                          job: job,
+                          onTap: () => _viewJobDetails(job),
+                          onDismiss: () {
+                            jobService.dismissJob(job.id!);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
+                    Positioned(
+                      bottom: 20,
+                      right: 20,
+                      child: FloatingActionButton.extended(
+                        onPressed: () {
+                          jobService.clearDismissedJobs();
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Show All Jobs'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
 
-        // Job listings
-        Expanded(
-          child: jobService.isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : displayJobs.isEmpty
-              ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.work_off_outlined,
-                  size: 64,
-                  color: Colors.grey,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _isSearching
-                      ? 'No jobs found for "${_searchController.text}"'
-                      : 'No jobs available',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                if (!_isSearching)
-                  const Text(
-                    'Check back later for new opportunities',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                const SizedBox(height: 24),
-                if (_isSearching)
-                  ElevatedButton(
-                    onPressed: () {
-                      _searchController.clear();
-                      _searchJobs('');
-                    },
-                    child: const Text('Clear Search'),
-                  ),
-                if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
-                  ElevatedButton(
-                    onPressed: () {
-                      jobService.clearDismissedJobs();
-                    },
-                    child: const Text('Show Hidden Jobs'),
-                  ),
-              ],
-            ),
-          )
-              : Stack(
-            children: [
-              RefreshIndicator(
-                onRefresh: _loadJobs,
-                child: ListView.builder(
-                  itemCount: displayJobs.length,
-                  itemBuilder: (context, index) {
-                    final job = displayJobs[index];
-                    return JobCard(
-                      job: job,
-                      onTap: () => _viewJobDetails(job),
-                      onDismiss: () {
-                        jobService.dismissJob(job.id!);
-                      },
-                    );
-                  },
+        // Search history overlay
+        if (_showSearchHistory)
+          Positioned(
+            top: 76, // Below search bar
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showSearchHistory = false;
+                  _searchFocusNode.unfocus();
+                });
+              },
+              child: Container(
+                color: Colors.black.withOpacity(0.1),
+                child: Column(
+                  children: [
+                    // History container
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.6,
+                      ),
+                      child: SearchHistoryWidget(
+                        onSelectSearch: (filters) {
+                          _applyHistorySearch(filters);
+                        },
+                      ),
+                    ),
+                    // Empty space to close when tapped
+                    Expanded(
+                      child: Container(),
+                    ),
+                  ],
                 ),
               ),
-              if (jobService.dismissedJobIds.isNotEmpty && !_isSearching)
-                Positioned(
-                  bottom: 20,
-                  right: 20,
-                  child: FloatingActionButton.extended(
-                    onPressed: () {
-                      jobService.clearDismissedJobs();
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Show All Jobs'),
-                  ),
-                ),
-            ],
+            ),
           ),
-        ),
       ],
     );
   }
 }
-
 // Applications Tab
 class _ApplicationsTab extends StatefulWidget {
   const _ApplicationsTab();

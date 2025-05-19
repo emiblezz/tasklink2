@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase/supabase.dart';
@@ -5,6 +6,7 @@ import 'package:tasklink2/config/app_config.dart';
 import 'package:tasklink2/models/application_model.dart';
 import 'package:tasklink2/models/job_model.dart';
 
+import '../models/job_search_model.dart';
 import 'auth_service.dart';
 import 'notification_service.dart';
 
@@ -26,6 +28,8 @@ class JobService with ChangeNotifier {
   List<JobModel> get jobs => _jobs;
   List<ApplicationModel> get applications => _applications;
   String? get statusFilter => _statusFilter;
+  final TextEditingController _minSalaryController = TextEditingController();
+  final TextEditingController _maxSalaryController = TextEditingController();
 
   // Getter for filtered jobs based on status
   List<JobModel> get recruiterJobs {
@@ -691,6 +695,121 @@ class JobService with ChangeNotifier {
         jobTitle: jobTitle,
         status: status,
       );
+    }
+  }
+
+  Future<List<JobModel>> advancedSearchJobs(JobSearchFilters filters) async {
+    try {
+      if (filters.isEmpty()) {
+        return _jobs;
+      }
+
+      // Filter jobs in memory based on the criteria
+      List<JobModel> filteredJobs = List.from(_jobs);
+
+      // Filter by text query (job title or company name)
+      if (filters.query != null && filters.query!.isNotEmpty) {
+        String lowerQuery = filters.query!.toLowerCase();
+        filteredJobs = filteredJobs.where((job) =>
+        job.jobTitle.toLowerCase().contains(lowerQuery) ||
+            job.companyName.toLowerCase().contains(lowerQuery) ||
+            (job.description != null && job.description!.toLowerCase().contains(lowerQuery))
+        ).toList();
+      }
+
+      // Filter by location
+      if (filters.location != null && filters.location!.isNotEmpty) {
+        String lowerLocation = filters.location!.toLowerCase();
+        filteredJobs = filteredJobs.where((job) =>
+            job.location.toLowerCase().contains(lowerLocation)
+        ).toList();
+      }
+
+      // Filter by job types
+      if (filters.jobTypes != null && filters.jobTypes!.isNotEmpty) {
+        filteredJobs = filteredJobs.where((job) =>
+            filters.jobTypes!.contains(job.jobType)
+        ).toList();
+      }
+
+      // Filter by salary range
+      if (filters.minSalary != null) {
+        filteredJobs = filteredJobs.where((job) {
+          if (job.salary == null) return false;
+
+          // Convert salary to double
+          double jobSalary;
+          try {
+            if (job.salary is String) {
+              // For string salaries, strip non-numeric chars and parse
+              final sanitized = job.salary.toString().replaceAll(RegExp(r'[^\d.]'), '');
+              jobSalary = double.parse(sanitized);
+            } else if (job.salary is num) {
+              // For numeric salaries, just convert to double
+              jobSalary = (job.salary as num).toDouble();
+            } else {
+              return false;
+            }
+
+            // Compare with the filter value
+            return jobSalary >= filters.minSalary!;
+          } catch (e) {
+            // Log parsing errors but don't crash
+            debugPrint('Error parsing salary: ${job.salary} - $e');
+            return false;
+          }
+        }).toList();
+      }
+
+      if (filters.maxSalary != null) {
+        filteredJobs = filteredJobs.where((job) {
+          if (job.salary == null) return false;
+
+          // Convert salary to double
+          double jobSalary;
+          try {
+            if (job.salary is String) {
+              // For string salaries, strip non-numeric chars and parse
+              final sanitized = job.salary.toString().replaceAll(RegExp(r'[^\d.]'), '');
+              jobSalary = double.parse(sanitized);
+            } else if (job.salary is num) {
+              // For numeric salaries, just convert to double
+              jobSalary = (job.salary as num).toDouble();
+            } else {
+              return false;
+            }
+
+            // Compare with the filter value
+            return jobSalary <= filters.maxSalary!;
+          } catch (e) {
+            // Log parsing errors but don't crash
+            debugPrint('Error parsing salary: ${job.salary} - $e');
+            return false;
+          }
+        }).toList();
+      }
+
+      // Filter by skills
+      if (filters.skills != null && filters.skills!.isNotEmpty) {
+        filteredJobs = filteredJobs.where((job) {
+          if (job.skills == null || job.skills!.isEmpty) return false;
+
+          // Check if job has any of the required skills
+          return job.skills!.any((skill) =>
+              filters.skills!.any((requiredSkill) =>
+                  skill.toLowerCase().contains(requiredSkill.toLowerCase())
+              )
+          );
+        }).toList();
+      }
+
+      // Filter by remote work option
+
+
+      return filteredJobs;
+    } catch (e) {
+      debugPrint('Error in advanced job search: $e');
+      return [];
     }
   }
 }

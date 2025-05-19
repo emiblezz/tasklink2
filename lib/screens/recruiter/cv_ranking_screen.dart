@@ -223,7 +223,7 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
       } else {
         setState(() {
           _isMatchingPersonalResume = false;
-          _errorMessage = "No resume found. Please upload your resume first.";
+          _errorMessage = "Rank Available Applicants.";
         });
       }
     } catch (e) {
@@ -819,13 +819,13 @@ class _CVRankingScreenState extends State<CVRankingScreen> with SingleTickerProv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.verified_user, size: 48, color: Colors.green),
             const SizedBox(height: 16),
             Text(_errorMessage!, textAlign: TextAlign.center),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _performRanking,
-              child: const Text('Try Again'),
+              child: const Text('Rank Applicants'),
             ),
           ],
         ),

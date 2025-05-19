@@ -146,44 +146,61 @@ class AuthService extends ChangeNotifier {
       debugPrint("Registering user with email: $email, role: $roleId");
 
       // Create the auth user with redirectTo for email confirmation
-      final authResponse = await _supabaseClient.auth.signUp(
-        email: email,
-        password: password,
-        data: {
-          'name': name,
-          'phone': phone,
-          'role_id': roleId,
-        },
-        emailRedirectTo: 'io.supabase.tasklink://auth/callback',
-      );
+      try {
+        final authResponse = await _supabaseClient.auth.signUp(
+          email: email,
+          password: password,
+          data: {
+            'name': name,
+            'phone': phone,
+            'role_id': roleId,
+          },
+          emailRedirectTo: 'io.supabase.tasklink://auth/callback',
+        );
 
-      if (authResponse.user == null) {
-        throw Exception('Failed to create user');
+        if (authResponse.user == null) {
+          throw Exception('Failed to create user');
+        }
+
+        debugPrint("User registered successfully: ${authResponse.user!.id}");
+
+        // Create user in database too
+        final newUser = UserModel(
+          id: authResponse.user!.id,
+          name: name,
+          email: email,
+          phone: phone,
+          roleId: roleId,
+          profileStatus: 'Incomplete',
+        );
+
+        // Save user to database
+        final createdUser = await _supabaseService.createOrUpdateUser(newUser);
+        if (createdUser == null) {
+          debugPrint("Warning: Failed to create user record in database");
+        } else {
+          debugPrint("User record created in database");
+        }
+
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } catch (e) {
+        debugPrint("Signup error details: $e");
+
+        // Check if this is the "user already registered" error
+        if (e.toString().contains('User already registered') ||
+            e.toString().contains('email already in use') ||
+            e.toString().contains('already exists')) {
+          logInfo("An account with this email already exists. Please log in instead.");
+        } else {
+          _errorMessage = e.toString();
+        }
+
+        _isLoading = false;
+        notifyListeners();
+        return false;
       }
-
-      debugPrint("User registered successfully: ${authResponse.user!.id}");
-
-      // Create user in database too
-      final newUser = UserModel(
-        id: authResponse.user!.id,
-        name: name,
-        email: email,
-        phone: phone,
-        roleId: roleId,
-        profileStatus: 'Incomplete',
-      );
-
-      // Save user to database
-      final createdUser = await _supabaseService.createOrUpdateUser(newUser);
-      if (createdUser == null) {
-        debugPrint("Warning: Failed to create user record in database");
-      } else {
-        debugPrint("User record created in database");
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
     } catch (e) {
       _errorMessage = e.toString();
       debugPrint("Registration error: $_errorMessage");
@@ -192,6 +209,18 @@ class AuthService extends ChangeNotifier {
       return false;
     }
   }
+  void logInfo(String message) {
+    debugPrint('INFO: $message');
+  }
+
+  void logWarning(String message) {
+    debugPrint('WARNING: $message');
+  }
+
+  void logError(String message) {
+    debugPrint('ERROR: $message');
+  }
+
   // Log in a user
   Future<bool> login({
     required String email,
@@ -294,22 +323,16 @@ class AuthService extends ChangeNotifier {
 
   Future<bool> userEmailExists(String email) async {
     try {
-      debugPrint("Checking if user with email exists: $email");
+      final response = await _supabaseClient.rpc(
+        'check_email_exists',
+        params: {'email_to_check': email},
+      );
 
-      // Use a Supabase query to check if the email already exists in the users table
-      final response = await _supabaseClient
-          .from('users')
-          .select('email')
-          .eq('email', email)
-          .limit(1);
-
-      // In the updated Supabase client, we directly get the data
-      // If there's an error, it would throw an exception
-      final data = response as List<dynamic>;
-      return data.isNotEmpty;
+      debugPrint('Email exists check result: $response');
+      return response as bool;
     } catch (e) {
-      debugPrint("Error checking if user exists: $e");
-      return false; // In case of error, proceed with registration attempt
+      debugPrint('Error checking if email exists: $e');
+      return false;
     }
   }
 

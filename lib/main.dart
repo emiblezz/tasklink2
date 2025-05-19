@@ -11,6 +11,7 @@ import 'package:tasklink2/services/notification_service.dart';
 import 'package:tasklink2/services/profile_service.dart';
 import 'package:tasklink2/services/ranking_service.dart';
 import 'package:tasklink2/services/recruiter_profile_service.dart' show RecruiterProfileService;
+import 'package:tasklink2/services/search_history_service.dart';
 import 'package:tasklink2/services/search_service.dart';
 import 'package:tasklink2/services/ai_services.dart';
 import 'package:tasklink2/utils/deep_link_handler.dart';
@@ -138,7 +139,7 @@ class MyApp extends StatelessWidget {
             );
           },
         ),
-
+        ChangeNotifierProvider(create: (_) => SearchHistoryService()),
         // JobService with its dependencies
         ChangeNotifierProxyProvider2<AuthService, NotificationService, JobService>(
           create: (_) => JobService(),
